@@ -17,7 +17,7 @@ impl GlobalAssembler {
         let num_dof = num_nodes * 6;
 
         let mut triplets: Vec<(usize, usize, f64)> = Vec::new();
-        
+
         let mut nodes_with_frame2d = std::collections::HashSet::new();
         let mut max_stiffness = 0.0_f64;
 
@@ -41,12 +41,13 @@ impl GlobalAssembler {
                         *plane,
                     );
 
-                    let k_elem = frame.global_stiffness_matrix(&node_i.coordinates, &node_j.coordinates);
+                    let k_elem =
+                        frame.global_stiffness_matrix(&node_i.coordinates, &node_j.coordinates);
                     let dof_map = frame.dof_mapping();
-                    
+
                     nodes_with_frame2d.insert(element.connectivity[0]);
                     nodes_with_frame2d.insert(element.connectivity[1]);
-                    
+
                     for i in 0..6 {
                         for j in 0..6 {
                             let val = k_elem[(i, j)].abs();
@@ -92,7 +93,8 @@ impl GlobalAssembler {
                     }
                 }
                 ElementType::Beam1D { .. } | ElementType::Frame3D => {
-                    let shear_modulus = material.elastic_modulus / (2.0 * (1.0 + material.poisson_ratio));
+                    let shear_modulus =
+                        material.elastic_modulus / (2.0 * (1.0 + material.poisson_ratio));
                     let props = BeamProperties {
                         elastic_modulus: material.elastic_modulus,
                         shear_modulus,
@@ -101,14 +103,11 @@ impl GlobalAssembler {
                         inertia_z: element.section.inertia_z,
                         torsion_constant: element.section.torsion_constant,
                     };
-                    let beam = BeamElement::new(
-                        &node_i.coordinates,
-                        &node_j.coordinates,
-                        &props,
-                    );
+                    let beam = BeamElement::new(&node_i.coordinates, &node_j.coordinates, &props);
 
-                    let k_elem = beam.global_stiffness_matrix(&node_i.coordinates, &node_j.coordinates);
-                    
+                    let k_elem =
+                        beam.global_stiffness_matrix(&node_i.coordinates, &node_j.coordinates);
+
                     for i in 0..12 {
                         for j in 0..12 {
                             let val = k_elem[(i, j)].abs();
@@ -119,10 +118,22 @@ impl GlobalAssembler {
                     }
 
                     if element.id == 0 {
-                        println!("Element 0: K_elem[2,2] (uz_i, uz_i) = {:.3e}", k_elem[(2, 2)]);
-                        println!("Element 0: K_elem[2,4] (uz_i, θy_i) = {:.3e}", k_elem[(2, 4)]);
-                        println!("Element 0: K_elem[4,4] (θy_i, θy_i) = {:.3e}", k_elem[(4, 4)]);
-                        println!("Element 0: K_elem[2,10] (uz_i, θy_j) = {:.3e}", k_elem[(2, 10)]);
+                        println!(
+                            "Element 0: K_elem[2,2] (uz_i, uz_i) = {:.3e}",
+                            k_elem[(2, 2)]
+                        );
+                        println!(
+                            "Element 0: K_elem[2,4] (uz_i, θy_i) = {:.3e}",
+                            k_elem[(2, 4)]
+                        );
+                        println!(
+                            "Element 0: K_elem[4,4] (θy_i, θy_i) = {:.3e}",
+                            k_elem[(4, 4)]
+                        );
+                        println!(
+                            "Element 0: K_elem[2,10] (uz_i, θy_j) = {:.3e}",
+                            k_elem[(2, 10)]
+                        );
                     }
 
                     let dof_i = element.connectivity[0] * 6;
@@ -163,12 +174,13 @@ impl GlobalAssembler {
                 _ => {}
             }
         }
-        
+
         if !nodes_with_frame2d.is_empty() && max_stiffness > 0.0 {
             let out_of_plane_penalty = max_stiffness * 1e-8;
-            
-            let mut frame2d_planes: std::collections::HashMap<usize, Plane> = std::collections::HashMap::new();
-            
+
+            let mut frame2d_planes: std::collections::HashMap<usize, Plane> =
+                std::collections::HashMap::new();
+
             for element in &model.elements {
                 if let ElementType::Frame2D { plane } = &element.element_type {
                     for &node_id in &element.connectivity {
@@ -176,16 +188,16 @@ impl GlobalAssembler {
                     }
                 }
             }
-            
+
             for (&node_id, &plane) in &frame2d_planes {
                 let dof_base = node_id * 6;
-                
+
                 let unconstrained_dofs: Vec<usize> = match plane {
                     Plane::XY => vec![2, 3, 4],
                     Plane::XZ => vec![1, 3, 5],
                     Plane::YZ => vec![0, 4, 5],
                 };
-                
+
                 for &local_dof in &unconstrained_dofs {
                     let global_dof = dof_base + local_dof;
                     triplets.push((global_dof, global_dof, out_of_plane_penalty));
@@ -246,10 +258,11 @@ impl GlobalAssembler {
                 }
                 crate::structure::load::Load::ElementLoad {
                     element_id,
-                    load_distribution: LoadDistribution::UniformDistributed {
-                        intensity,
-                        direction,
-                    },
+                    load_distribution:
+                        LoadDistribution::UniformDistributed {
+                            intensity,
+                            direction,
+                        },
                 } => {
                     let element = &model.elements[*element_id];
                     let node_i_id = element.connectivity[0];
@@ -332,9 +345,9 @@ impl GlobalAssembler {
                     }
                     // Constrain torsion about the free direction
                     let torsion_dof = match free_direction {
-                        Direction::X => 3,  // θx
-                        Direction::Y => 4,  // θy
-                        Direction::Z => 5,  // θz
+                        Direction::X => 3, // θx
+                        Direction::Y => 4, // θy
+                        Direction::Z => 5, // θz
                     };
                     Self::apply_penalty_to_dof(k, f, base_dof + torsion_dof, penalty);
                 }
@@ -362,7 +375,12 @@ impl GlobalAssembler {
         }
     }
 
-    fn apply_penalty_to_dof(k: &mut CsrMatrix<f64>, _f: &mut DVector<f64>, dof: usize, penalty: f64) {
+    fn apply_penalty_to_dof(
+        k: &mut CsrMatrix<f64>,
+        _f: &mut DVector<f64>,
+        dof: usize,
+        penalty: f64,
+    ) {
         let (row_offsets, col_indices, values) = k.csr_data_mut();
 
         let start = row_offsets[dof];
@@ -380,7 +398,7 @@ impl GlobalAssembler {
         model: &StructuralModel,
         displacement_vector: &DVector<f64>,
     ) -> Vec<crate::analysis::result::ElementForces> {
-        use crate::analysis::result::{ElementForces, ElementForceComponents};
+        use crate::analysis::result::{ElementForceComponents, ElementForces};
 
         let mut element_forces = Vec::new();
 
@@ -391,7 +409,8 @@ impl GlobalAssembler {
                     let node_i = &model.nodes[element.connectivity[0]];
                     let node_j = &model.nodes[element.connectivity[1]];
 
-                    let shear_modulus = material.elastic_modulus / (2.0 * (1.0 + material.poisson_ratio));
+                    let shear_modulus =
+                        material.elastic_modulus / (2.0 * (1.0 + material.poisson_ratio));
                     let props = BeamProperties {
                         elastic_modulus: material.elastic_modulus,
                         shear_modulus,
@@ -400,11 +419,7 @@ impl GlobalAssembler {
                         inertia_z: element.section.inertia_z,
                         torsion_constant: element.section.torsion_constant,
                     };
-                    let beam = BeamElement::new(
-                        &node_i.coordinates,
-                        &node_j.coordinates,
-                        &props,
-                    );
+                    let beam = BeamElement::new(&node_i.coordinates, &node_j.coordinates, &props);
 
                     let dof_i = element.connectivity[0] * 6;
                     let dof_j = element.connectivity[1] * 6;
@@ -484,14 +499,14 @@ impl GlobalAssembler {
                         Direction::Z => 2,
                     };
                     dofs.retain(|&d| d != free_translation_dof);
-                    
+
                     let torsion_dof = match free_direction {
                         Direction::X => 3,
                         Direction::Y => 4,
                         Direction::Z => 5,
                     };
                     dofs.push(torsion_dof);
-                    
+
                     dofs
                 }
                 SupportType::ElasticSpring { stiffness } => {
@@ -536,7 +551,12 @@ impl GlobalAssembler {
                 }
             }
 
-            reactions.push(SupportReaction::new(support.id, support.node_id, force, moment));
+            reactions.push(SupportReaction::new(
+                support.id,
+                support.node_id,
+                force,
+                moment,
+            ));
         }
 
         reactions

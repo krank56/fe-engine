@@ -128,4 +128,3 @@ fn test_end_to_end_beam_analysis() {
         assert!(result.to_json().is_ok());
     }
 }
-

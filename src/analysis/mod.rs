@@ -15,4 +15,4 @@ pub use result::{
     AnalysisResult, ElementForceComponents, ElementForces, ModelSnapshot, NodalDisplacement,
     SolverBackend, SolverInfo, SupportId, SupportReaction,
 };
-pub use solver::{LinearSolver, auto_select_solver, create_solver, is_gpu_available};
+pub use solver::{auto_select_solver, create_solver, is_gpu_available, LinearSolver};

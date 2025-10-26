@@ -101,7 +101,7 @@ fn test_end_to_end_frame_analysis() {
     let lateral_force = 5000.0;
 
     let load_case_builder = builder.create_load_case("Dead Load", LoadType::Dead);
-    
+
     for &elem_id in &beam_element_ids {
         load_case_builder
             .add_element_load(
@@ -117,7 +117,7 @@ fn test_end_to_end_frame_analysis() {
             )
             .unwrap();
     }
-    
+
     load_case_builder.finish();
 
     builder

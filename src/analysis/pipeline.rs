@@ -32,55 +32,98 @@ impl<'a> AnalysisPipeline<'a> {
     ) -> Result<AnalysisResult, SolverError> {
         self.audit_trail.append_action("start_analysis");
 
-        self.audit_trail.append_with_details("assemble_global_stiffness", vec![
-            ("num_elements".to_string(), AuditValue::Integer(self.model.elements.len() as i64)),
-            ("num_nodes".to_string(), AuditValue::Integer(self.model.nodes.len() as i64)),
-        ]);
+        self.audit_trail.append_with_details(
+            "assemble_global_stiffness",
+            vec![
+                (
+                    "num_elements".to_string(),
+                    AuditValue::Integer(self.model.elements.len() as i64),
+                ),
+                (
+                    "num_nodes".to_string(),
+                    AuditValue::Integer(self.model.nodes.len() as i64),
+                ),
+            ],
+        );
         let mut k = GlobalAssembler::assemble_global_stiffness(self.model);
-        self.audit_trail.append_with_details("stiffness_matrix_assembled", vec![
-            ("matrix_size".to_string(), AuditValue::Integer(k.nrows() as i64)),
-            ("nnz".to_string(), AuditValue::Integer(k.nnz() as i64)),
-        ]);
+        self.audit_trail.append_with_details(
+            "stiffness_matrix_assembled",
+            vec![
+                (
+                    "matrix_size".to_string(),
+                    AuditValue::Integer(k.nrows() as i64),
+                ),
+                ("nnz".to_string(), AuditValue::Integer(k.nnz() as i64)),
+            ],
+        );
 
         let k_original = k.clone();
 
         self.audit_trail.append_action("assemble_load_vector");
         let mut f = GlobalAssembler::assemble_load_vector(self.model, load_case);
-        self.audit_trail.append_with_details("load_vector_assembled", vec![
-            ("num_dofs".to_string(), AuditValue::Integer(f.len() as i64)),
-            ("load_norm".to_string(), AuditValue::Float(f.norm())),
-        ]);
+        self.audit_trail.append_with_details(
+            "load_vector_assembled",
+            vec![
+                ("num_dofs".to_string(), AuditValue::Integer(f.len() as i64)),
+                ("load_norm".to_string(), AuditValue::Float(f.norm())),
+            ],
+        );
 
         let f_original = f.clone();
 
-        self.audit_trail.append_with_details("apply_boundary_conditions", vec![
-            ("num_supports".to_string(), AuditValue::Integer(self.model.supports.len() as i64)),
-        ]);
+        self.audit_trail.append_with_details(
+            "apply_boundary_conditions",
+            vec![(
+                "num_supports".to_string(),
+                AuditValue::Integer(self.model.supports.len() as i64),
+            )],
+        );
         GlobalAssembler::apply_boundary_conditions(&mut k, &mut f, self.model);
 
-        self.audit_trail.append_with_details("solve_linear_system", vec![
-            ("solver".to_string(), AuditValue::String(solver.name().to_string())),
-            ("dofs".to_string(), AuditValue::Integer(f.len() as i64)),
-        ]);
+        self.audit_trail.append_with_details(
+            "solve_linear_system",
+            vec![
+                (
+                    "solver".to_string(),
+                    AuditValue::String(solver.name().to_string()),
+                ),
+                ("dofs".to_string(), AuditValue::Integer(f.len() as i64)),
+            ],
+        );
         let start = Instant::now();
         let u = solver.solve(&k, &f)?;
         let solve_time = start.elapsed();
-        self.audit_trail.append_with_details("linear_system_solved", vec![
-            ("solve_time_ms".to_string(), AuditValue::Float(solve_time.as_secs_f64() * 1000.0)),
-            ("displacement_norm".to_string(), AuditValue::Float(u.norm())),
-        ]);
+        self.audit_trail.append_with_details(
+            "linear_system_solved",
+            vec![
+                (
+                    "solve_time_ms".to_string(),
+                    AuditValue::Float(solve_time.as_secs_f64() * 1000.0),
+                ),
+                ("displacement_norm".to_string(), AuditValue::Float(u.norm())),
+            ],
+        );
 
         self.audit_trail.append_action("compute_element_forces");
         let element_forces = GlobalAssembler::recover_element_forces(self.model, &u);
-        self.audit_trail.append_with_details("element_forces_computed", vec![
-            ("num_elements".to_string(), AuditValue::Integer(element_forces.len() as i64)),
-        ]);
+        self.audit_trail.append_with_details(
+            "element_forces_computed",
+            vec![(
+                "num_elements".to_string(),
+                AuditValue::Integer(element_forces.len() as i64),
+            )],
+        );
 
         self.audit_trail.append_action("compute_support_reactions");
-        let reactions = GlobalAssembler::compute_reactions(self.model, &k_original, &u, &f_original);
-        self.audit_trail.append_with_details("support_reactions_computed", vec![
-            ("num_reactions".to_string(), AuditValue::Integer(reactions.len() as i64)),
-        ]);
+        let reactions =
+            GlobalAssembler::compute_reactions(self.model, &k_original, &u, &f_original);
+        self.audit_trail.append_with_details(
+            "support_reactions_computed",
+            vec![(
+                "num_reactions".to_string(),
+                AuditValue::Integer(reactions.len() as i64),
+            )],
+        );
 
         self.verify_equilibrium(&f_original, &reactions);
 
@@ -109,7 +152,11 @@ impl<'a> AnalysisPipeline<'a> {
         ))
     }
 
-    fn verify_equilibrium(&mut self, applied_loads: &DVector<f64>, reactions: &[crate::analysis::result::SupportReaction]) {
+    fn verify_equilibrium(
+        &mut self,
+        applied_loads: &DVector<f64>,
+        reactions: &[crate::analysis::result::SupportReaction],
+    ) {
         let total_applied_force = Vector3D {
             x: applied_loads.iter().step_by(6).sum(),
             y: applied_loads.iter().skip(1).step_by(6).sum(),
@@ -129,11 +176,20 @@ impl<'a> AnalysisPipeline<'a> {
         };
 
         let force_imbalance = force_balance.magnitude();
-        
-        self.audit_trail.append_with_details("verify_equilibrium", vec![
-            ("force_imbalance".to_string(), AuditValue::Float(force_imbalance)),
-            ("equilibrium_satisfied".to_string(), AuditValue::Boolean(force_imbalance <= 1e-6)),
-        ]);
+
+        self.audit_trail.append_with_details(
+            "verify_equilibrium",
+            vec![
+                (
+                    "force_imbalance".to_string(),
+                    AuditValue::Float(force_imbalance),
+                ),
+                (
+                    "equilibrium_satisfied".to_string(),
+                    AuditValue::Boolean(force_imbalance <= 1e-6),
+                ),
+            ],
+        );
     }
 
     fn convert_to_nodal_displacements(&self, u: &DVector<f64>) -> Vec<NodalDisplacement> {
@@ -159,5 +215,4 @@ impl<'a> AnalysisPipeline<'a> {
 
         displacements
     }
-
 }

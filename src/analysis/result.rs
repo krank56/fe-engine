@@ -317,13 +317,17 @@ impl AnalysisResult {
         serde_json::to_string_pretty(self)
     }
 
-    pub fn verify_equilibrium(&self, applied_loads: &crate::structure::load::LoadCase, model: &crate::structure::model::StructuralModel) -> bool {
+    pub fn verify_equilibrium(
+        &self,
+        applied_loads: &crate::structure::load::LoadCase,
+        model: &crate::structure::model::StructuralModel,
+    ) -> bool {
         use crate::structure::load::{Load, LoadDistribution};
-        
+
         let (total_reactions, _) = self.total_reactions();
-        
+
         let mut total_applied_force = Vector3D::zero();
-        
+
         for load in &applied_loads.loads {
             match load {
                 Load::NodalForce { force, .. } => {
@@ -331,13 +335,20 @@ impl AnalysisResult {
                     total_applied_force.y += force.y;
                     total_applied_force.z += force.z;
                 }
-                Load::ElementLoad { element_id, load_distribution } => {
+                Load::ElementLoad {
+                    element_id,
+                    load_distribution,
+                } => {
                     if let Some(element) = model.elements.iter().find(|e| e.id == *element_id) {
-                        if let LoadDistribution::UniformDistributed { intensity, direction } = load_distribution {
+                        if let LoadDistribution::UniformDistributed {
+                            intensity,
+                            direction,
+                        } = load_distribution
+                        {
                             let node_i = &model.nodes[element.connectivity[0]];
                             let node_j = &model.nodes[element.connectivity[1]];
                             let length = node_i.coordinates.distance_to(&node_j.coordinates);
-                            
+
                             let total_load = *intensity * length;
                             total_applied_force.x += total_load * direction.x;
                             total_applied_force.y += total_load * direction.y;
@@ -348,14 +359,14 @@ impl AnalysisResult {
                 Load::ImposedDisplacement { .. } => {}
             }
         }
-        
+
         let net_force_x = (total_reactions.x + total_applied_force.x).abs();
         let net_force_y = (total_reactions.y + total_applied_force.y).abs();
         let net_force_z = (total_reactions.z + total_applied_force.z).abs();
-        
+
         let total_applied = total_applied_force.magnitude();
         let tolerance = total_applied.max(1.0) * 1e-6;
-        
+
         net_force_x < tolerance && net_force_y < tolerance && net_force_z < tolerance
     }
 }

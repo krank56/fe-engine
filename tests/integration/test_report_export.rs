@@ -7,18 +7,18 @@ fn test_export_displacements_csv() {
     let model = create_simple_beam_model();
     let solver = CpuCholesky;
     let load_case = &model.load_cases[0];
-    
+
     let mut pipeline = AnalysisPipeline::new(&model);
     let result = pipeline.run(&solver, load_case).unwrap();
-    
+
     let temp_dir = TempDir::new().unwrap();
     let csv_path = temp_dir.path().join("displacements.csv");
-    
+
     result.export_displacements_csv(&csv_path).unwrap();
-    
+
     assert!(csv_path.exists());
     let content = std::fs::read_to_string(&csv_path).unwrap();
-    
+
     assert!(content.contains("NodeID"));
     assert!(content.contains("TX(m)"));
     assert!(content.contains("TY(m)"));
@@ -26,7 +26,7 @@ fn test_export_displacements_csv() {
     assert!(content.contains("RX(rad)"));
     assert!(content.contains("RY(rad)"));
     assert!(content.contains("RZ(rad)"));
-    
+
     let lines: Vec<_> = content.lines().collect();
     assert_eq!(lines.len(), result.displacements.len() + 1);
 }
@@ -36,18 +36,18 @@ fn test_export_reactions_csv() {
     let model = create_simple_beam_model();
     let solver = CpuCholesky;
     let load_case = &model.load_cases[0];
-    
+
     let mut pipeline = AnalysisPipeline::new(&model);
     let result = pipeline.run(&solver, load_case).unwrap();
-    
+
     let temp_dir = TempDir::new().unwrap();
     let csv_path = temp_dir.path().join("reactions.csv");
-    
+
     result.export_reactions_csv(&csv_path).unwrap();
-    
+
     assert!(csv_path.exists());
     let content = std::fs::read_to_string(&csv_path).unwrap();
-    
+
     assert!(content.contains("SupportID"));
     assert!(content.contains("NodeID"));
     assert!(content.contains("FX(N)"));
@@ -56,7 +56,7 @@ fn test_export_reactions_csv() {
     assert!(content.contains("MX(Nm)"));
     assert!(content.contains("MY(Nm)"));
     assert!(content.contains("MZ(Nm)"));
-    
+
     let lines: Vec<_> = content.lines().collect();
     assert_eq!(lines.len(), result.reactions.len() + 1);
 }
@@ -66,18 +66,18 @@ fn test_export_beam_forces_csv() {
     let model = create_simple_beam_model();
     let solver = CpuCholesky;
     let load_case = &model.load_cases[0];
-    
+
     let mut pipeline = AnalysisPipeline::new(&model);
     let result = pipeline.run(&solver, load_case).unwrap();
-    
+
     let temp_dir = TempDir::new().unwrap();
     let csv_path = temp_dir.path().join("beam_forces.csv");
-    
+
     result.export_beam_forces_csv(0, &csv_path).unwrap();
-    
+
     assert!(csv_path.exists());
     let content = std::fs::read_to_string(&csv_path).unwrap();
-    
+
     assert!(content.contains("Position(m)"));
     assert!(content.contains("Axial(N)"));
     assert!(content.contains("ShearY(N)"));
@@ -92,41 +92,41 @@ fn test_csv_export_fails_for_nonexistent_element() {
     let model = create_simple_beam_model();
     let solver = CpuCholesky;
     let load_case = &model.load_cases[0];
-    
+
     let mut pipeline = AnalysisPipeline::new(&model);
     let result = pipeline.run(&solver, load_case).unwrap();
-    
+
     let temp_dir = TempDir::new().unwrap();
     let csv_path = temp_dir.path().join("beam_forces.csv");
-    
+
     let export_result = result.export_beam_forces_csv(9999, &csv_path);
     assert!(export_result.is_err());
 }
 
 fn create_simple_beam_model() -> StructuralModel {
     let mut builder = ModelBuilder::new("Simple Beam Test");
-    
+
     let concrete = materials::concrete_c30_37();
     builder.add_material(concrete);
-    
+
     let section = sections::rectangular(0.3, 0.3);
-    
+
     let span = 10.0;
     let num_elements = 10;
-    
+
     let nodes: Vec<_> = (0..=num_elements)
         .map(|i| {
             let x = (i as f64) * span / (num_elements as f64);
             builder.add_node(Point3D { x, y: 0.0, z: 0.0 })
         })
         .collect();
-    
+
     for i in 0..num_elements {
         builder
             .add_beam_element(nodes[i], nodes[i + 1], 0, section.clone())
             .unwrap();
     }
-    
+
     builder.add_support(nodes[0], SupportType::Fixed).unwrap();
     builder
         .add_support(
@@ -136,7 +136,7 @@ fn create_simple_beam_model() -> StructuralModel {
             },
         )
         .unwrap();
-    
+
     builder
         .create_load_case("UDL", LoadType::Live)
         .add_uniform_load_on_all_elements(
@@ -149,6 +149,6 @@ fn create_simple_beam_model() -> StructuralModel {
         )
         .unwrap()
         .finish();
-    
+
     builder.build().unwrap()
 }

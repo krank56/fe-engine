@@ -130,10 +130,18 @@ impl std::error::Error for ValidationError {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuildError {
-    DuplicateId { message: String },
-    InvalidProperty { message: String },
-    MissingRequiredField { field: String },
-    InconsistentState { message: String },
+    DuplicateId {
+        message: String,
+    },
+    InvalidProperty {
+        message: String,
+    },
+    MissingRequiredField {
+        field: String,
+    },
+    InconsistentState {
+        message: String,
+    },
     InvalidNodeReference {
         element_id: ElementId,
         node_id: NodeId,

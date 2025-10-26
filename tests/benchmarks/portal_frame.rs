@@ -110,7 +110,7 @@ fn test_portal_frame_lateral_load() {
     assert!(disp_n1.translation.x > 0.0);
 
     let (total_force, _total_moment) = result.total_reactions();
-    
+
     assert_relative_eq!(
         total_force.x.abs(),
         lateral_force,
@@ -219,7 +219,7 @@ fn test_portal_frame_vertical_load() {
     let udl = 15000.0;
 
     let load_case_builder = builder.create_load_case("Uniform Dead Load", LoadType::Dead);
-    
+
     for &elem_id in &beam_element_ids {
         load_case_builder
             .add_element_load(
@@ -235,7 +235,7 @@ fn test_portal_frame_vertical_load() {
             )
             .unwrap();
     }
-    
+
     load_case_builder.finish();
 
     let model = builder.build().unwrap();

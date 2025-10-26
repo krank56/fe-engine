@@ -72,7 +72,11 @@ fn create_large_grid_model(nx: usize, ny: usize) -> (StructuralModel, LoadCase) 
         .create_load_case("Uniform Gravity", LoadType::Dead)
         .add_nodal_force(
             node_grid[ny - 1][nx / 2],
-            Vector3D { x: 0.0, y: 0.0, z: -10000.0 },
+            Vector3D {
+                x: 0.0,
+                y: 0.0,
+                z: -10000.0,
+            },
             Vector3D::zero(),
         )
         .unwrap()
@@ -85,13 +89,12 @@ fn create_large_grid_model(nx: usize, ny: usize) -> (StructuralModel, LoadCase) 
 }
 
 #[test]
-#[cfg_attr(feature = "gpu", ignore = "GPU solver has known accuracy issues for large models (experimental)")]
+#[cfg_attr(
+    feature = "gpu",
+    ignore = "GPU solver has known accuracy issues for large models (experimental)"
+)]
 fn benchmark_cpu_vs_gpu_large_model() {
-    let grid_sizes = vec![
-        (10, 10),
-        (30, 30),
-        (50, 50),
-    ];
+    let grid_sizes = vec![(10, 10), (30, 30), (50, 50)];
 
     println!("\n{:=<80}", "");
     println!("GPU Performance Benchmark: CPU Cholesky vs Metal PCG");
@@ -106,40 +109,52 @@ fn benchmark_cpu_vs_gpu_large_model() {
         let num_elements = model.elements.len();
         let num_dof = num_nodes * 6;
 
-        println!("Grid: {}x{} | Nodes: {} | Elements: {} | DOF: {}",
-            nx, ny, num_nodes, num_elements, num_dof);
+        println!(
+            "Grid: {}x{} | Nodes: {} | Elements: {} | DOF: {}",
+            nx, ny, num_nodes, num_elements, num_dof
+        );
 
         let cpu_solver = CpuCholesky;
         let mut cpu_pipeline = AnalysisPipeline::new(&model);
-        
+
         let cpu_start = Instant::now();
         let cpu_result = cpu_pipeline.run(&cpu_solver, &load_case).unwrap();
         let cpu_duration = cpu_start.elapsed();
 
-        println!("  CPU Cholesky: {:.3} ms", cpu_duration.as_secs_f64() * 1000.0);
+        println!(
+            "  CPU Cholesky: {:.3} ms",
+            cpu_duration.as_secs_f64() * 1000.0
+        );
 
         #[cfg(all(target_os = "macos", feature = "gpu"))]
         {
             use fe_engine::analysis::gpu::MetalPCG;
-            
+
             match MetalPCG::new() {
                 Ok(gpu_solver) => {
                     let mut gpu_pipeline = AnalysisPipeline::new(&model);
-                    
+
                     let gpu_start = Instant::now();
                     let gpu_result = gpu_pipeline.run(&gpu_solver, &load_case).unwrap();
                     let gpu_duration = gpu_start.elapsed();
 
                     let speedup = cpu_duration.as_secs_f64() / gpu_duration.as_secs_f64();
 
-                    println!("  Metal PCG:    {:.3} ms", gpu_duration.as_secs_f64() * 1000.0);
+                    println!(
+                        "  Metal PCG:    {:.3} ms",
+                        gpu_duration.as_secs_f64() * 1000.0
+                    );
                     println!("  Speedup:      {:.2}x\n", speedup);
 
                     let sample_node_id = num_nodes / 2;
-                    let cpu_disp = cpu_result.displacements.iter()
+                    let cpu_disp = cpu_result
+                        .displacements
+                        .iter()
                         .find(|d| d.node_id == sample_node_id)
                         .expect(&format!("CPU result missing node {}", sample_node_id));
-                    let gpu_disp = gpu_result.displacements.iter()
+                    let gpu_disp = gpu_result
+                        .displacements
+                        .iter()
                         .find(|d| d.node_id == sample_node_id)
                         .expect(&format!("GPU result missing node {}", sample_node_id));
 

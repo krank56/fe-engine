@@ -76,15 +76,7 @@ impl Frame2DElement {
         let sin_theta = dy / l;
 
         let r = nalgebra::Matrix3::from_row_slice(&[
-            cos_theta,
-            sin_theta,
-            0.0,
-            -sin_theta,
-            cos_theta,
-            0.0,
-            0.0,
-            0.0,
-            1.0,
+            cos_theta, sin_theta, 0.0, -sin_theta, cos_theta, 0.0, 0.0, 0.0, 1.0,
         ]);
 
         let mut t = SMatrix::<f64, 6, 6>::zeros();

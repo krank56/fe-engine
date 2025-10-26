@@ -22,11 +22,7 @@ pub struct BeamElement {
 }
 
 impl BeamElement {
-    pub fn new(
-        node_i: &Point3D,
-        node_j: &Point3D,
-        props: &BeamProperties,
-    ) -> Self {
+    pub fn new(node_i: &Point3D, node_j: &Point3D, props: &BeamProperties) -> Self {
         let dx = node_j.x - node_i.x;
         let dy = node_j.y - node_i.y;
         let dz = node_j.z - node_i.z;
@@ -107,46 +103,32 @@ impl BeamElement {
             if cx > 0.0 {
                 nalgebra::Matrix3::identity()
             } else {
-                nalgebra::Matrix3::from_row_slice(&[
-                    -1.0, 0.0, 0.0,
-                    0.0, -1.0, 0.0,
-                    0.0, 0.0, 1.0,
-                ])
+                nalgebra::Matrix3::from_row_slice(&[-1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0])
             }
         } else if (cy.abs() - 1.0).abs() < tol {
             if cy > 0.0 {
-                nalgebra::Matrix3::from_row_slice(&[
-                    0.0, 1.0, 0.0,
-                    -1.0, 0.0, 0.0,
-                    0.0, 0.0, 1.0,
-                ])
+                nalgebra::Matrix3::from_row_slice(&[0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0])
             } else {
-                nalgebra::Matrix3::from_row_slice(&[
-                    0.0, -1.0, 0.0,
-                    1.0, 0.0, 0.0,
-                    0.0, 0.0, 1.0,
-                ])
+                nalgebra::Matrix3::from_row_slice(&[0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0])
             }
         } else if (cz.abs() - 1.0).abs() < tol {
             if cz > 0.0 {
-                nalgebra::Matrix3::from_row_slice(&[
-                    0.0, 0.0, 1.0,
-                    0.0, 1.0, 0.0,
-                    -1.0, 0.0, 0.0,
-                ])
+                nalgebra::Matrix3::from_row_slice(&[0.0, 0.0, 1.0, 0.0, 1.0, 0.0, -1.0, 0.0, 0.0])
             } else {
-                nalgebra::Matrix3::from_row_slice(&[
-                    0.0, 0.0, -1.0,
-                    0.0, 1.0, 0.0,
-                    1.0, 0.0, 0.0,
-                ])
+                nalgebra::Matrix3::from_row_slice(&[0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0])
             }
         } else {
             let d = (cx * cx + cy * cy).sqrt();
             nalgebra::Matrix3::from_row_slice(&[
-                cx, cy, cz,
-                -cy / d, cx / d, 0.0,
-                -cx * cz / d, -cy * cz / d, d,
+                cx,
+                cy,
+                cz,
+                -cy / d,
+                cx / d,
+                0.0,
+                -cx * cz / d,
+                -cy * cz / d,
+                d,
             ])
         };
 

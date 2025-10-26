@@ -91,15 +91,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let total_analysis_time = analysis_start.elapsed();
 
     println!("\n=== Performance Results ===");
-    println!("Solve time:       {:.2} ms", result.solver_info.solve_time.as_millis());
-    println!("Total analysis:   {:.2} ms", total_analysis_time.as_millis());
+    println!(
+        "Solve time:       {:.2} ms",
+        result.solver_info.solve_time.as_millis()
+    );
+    println!(
+        "Total analysis:   {:.2} ms",
+        total_analysis_time.as_millis()
+    );
     println!("Build time:       {:.2} ms", build_time.as_millis());
-    println!("Grand total:      {:.2} ms\n", (build_time + total_analysis_time).as_millis());
+    println!(
+        "Grand total:      {:.2} ms\n",
+        (build_time + total_analysis_time).as_millis()
+    );
 
     let max_disp = result.max_displacement();
     let (node_id, _) = result.max_displacement_location();
     println!("=== Results ===");
-    println!("Max displacement: {:.3} mm at node {}", max_disp * 1000.0, node_id);
+    println!(
+        "Max displacement: {:.3} mm at node {}",
+        max_disp * 1000.0,
+        node_id
+    );
 
     let (total_force, _) = result.total_reactions();
     println!(

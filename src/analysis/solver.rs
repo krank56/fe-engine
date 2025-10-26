@@ -1,18 +1,14 @@
 use nalgebra::DVector;
 use nalgebra_sparse::CsrMatrix;
 
-use crate::analysis::SolverError;
 use crate::analysis::cpu_solver::CpuCholesky;
+use crate::analysis::SolverError;
 
 #[cfg(all(target_os = "macos", feature = "gpu"))]
 use crate::analysis::gpu::MetalPCG;
 
 pub trait LinearSolver {
-    fn solve(
-        &self,
-        k: &CsrMatrix<f64>,
-        f: &DVector<f64>,
-    ) -> Result<DVector<f64>, SolverError>;
+    fn solve(&self, k: &CsrMatrix<f64>, f: &DVector<f64>) -> Result<DVector<f64>, SolverError>;
 
     fn name(&self) -> &str;
 }
@@ -45,12 +41,12 @@ pub fn auto_select_solver(num_dofs: usize) -> crate::analysis::result::SolverBac
             return crate::analysis::result::SolverBackend::GpuIterative;
         }
     }
-    
+
     #[cfg(not(all(target_os = "macos", feature = "gpu")))]
     {
         let _ = num_dofs;
     }
-    
+
     crate::analysis::result::SolverBackend::CpuCholesky
 }
 

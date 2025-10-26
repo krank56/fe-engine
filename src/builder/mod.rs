@@ -4,9 +4,7 @@ use crate::structure::element::{BeamFormulation, Element, ElementId, ElementType
 use crate::structure::geometry::{Point3D, Vector3D};
 use crate::structure::load::{Load, LoadCase, LoadCaseId, LoadDistribution, LoadType};
 use crate::structure::material::{Material, MaterialId};
-use crate::structure::model::{
-    CoordinateSystem, ModelMetadata, StructuralModel, UnitSystem,
-};
+use crate::structure::model::{CoordinateSystem, ModelMetadata, StructuralModel, UnitSystem};
 use crate::structure::node::{DofMask, Node, NodeId};
 use crate::structure::section::Section;
 use crate::structure::support::{Support, SupportId, SupportType};
@@ -296,8 +294,7 @@ impl LoadCaseBuilder {
         Ok(self)
     }
 
-    pub fn finish(&mut self) {
-    }
+    pub fn finish(&mut self) {}
 
     fn into_load_case(self) -> LoadCase {
         LoadCase {

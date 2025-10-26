@@ -282,40 +282,33 @@ fn validate_frame_stability(model: &StructuralModel) -> Vec<ValidationError> {
                 constrained_dofs.insert((support.node_id, "uy"));
                 constrained_dofs.insert((support.node_id, "uz"));
             }
-            SupportType::Roller { free_direction } => {
-                match free_direction {
-                    Direction::X => {
-                        constrained_dofs.insert((support.node_id, "uy"));
-                        constrained_dofs.insert((support.node_id, "uz"));
-                    }
-                    Direction::Y => {
-                        constrained_dofs.insert((support.node_id, "ux"));
-                        constrained_dofs.insert((support.node_id, "uz"));
-                    }
-                    Direction::Z => {
-                        constrained_dofs.insert((support.node_id, "ux"));
-                        constrained_dofs.insert((support.node_id, "uy"));
-                    }
+            SupportType::Roller { free_direction } => match free_direction {
+                Direction::X => {
+                    constrained_dofs.insert((support.node_id, "uy"));
+                    constrained_dofs.insert((support.node_id, "uz"));
                 }
-            }
+                Direction::Y => {
+                    constrained_dofs.insert((support.node_id, "ux"));
+                    constrained_dofs.insert((support.node_id, "uz"));
+                }
+                Direction::Z => {
+                    constrained_dofs.insert((support.node_id, "ux"));
+                    constrained_dofs.insert((support.node_id, "uy"));
+                }
+            },
             SupportType::ElasticSpring { .. } => {}
         }
     }
 
-    let has_2d_frames = model.elements.iter().any(|e| {
-        matches!(e.element_type, ElementType::Frame2D { .. })
-    });
+    let has_2d_frames = model
+        .elements
+        .iter()
+        .any(|e| matches!(e.element_type, ElementType::Frame2D { .. }));
 
     if has_2d_frames {
-        let ux_constrained = constrained_dofs
-            .iter()
-            .any(|(_, dof)| *dof == "ux");
-        let uy_constrained = constrained_dofs
-            .iter()
-            .any(|(_, dof)| *dof == "uy");
-        let uz_constrained = constrained_dofs
-            .iter()
-            .any(|(_, dof)| *dof == "uz");
+        let ux_constrained = constrained_dofs.iter().any(|(_, dof)| *dof == "ux");
+        let uy_constrained = constrained_dofs.iter().any(|(_, dof)| *dof == "uy");
+        let uz_constrained = constrained_dofs.iter().any(|(_, dof)| *dof == "uz");
         let rotation_constrained = constrained_dofs
             .iter()
             .any(|(_, dof)| *dof == "rx" || *dof == "ry" || *dof == "rz");
@@ -397,7 +390,11 @@ mod tests {
         ];
 
         let errors = validate_frame_stability(&model);
-        assert_eq!(errors.len(), 0, "Two pinned supports should satisfy stability");
+        assert_eq!(
+            errors.len(),
+            0,
+            "Two pinned supports should satisfy stability"
+        );
     }
 
     #[test]
@@ -479,8 +476,8 @@ mod tests {
     }
 
     fn create_simple_frame() -> StructuralModel {
-        use crate::structure::node::DofMask;
         use crate::structure::material::{ConcreteGrade, ConcreteStandard};
+        use crate::structure::node::DofMask;
 
         StructuralModel {
             nodes: vec![

@@ -86,7 +86,7 @@ fn test_simple_beam_deflection() {
     let load_case = &model.load_cases[0];
 
     let mut pipeline = AnalysisPipeline::new(&model);
-    
+
     let result = pipeline.run(&solver, load_case).unwrap();
 
     let mid_node = num_elements / 2;

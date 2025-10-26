@@ -6,9 +6,9 @@ use std::path::Path;
 impl AnalysisResult {
     pub fn export_displacements_csv(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let mut file = std::fs::File::create(path)?;
-        
+
         writeln!(file, "NodeID,TX(m),TY(m),TZ(m),RX(rad),RY(rad),RZ(rad)")?;
-        
+
         for disp in &self.displacements {
             writeln!(
                 file,
@@ -22,15 +22,18 @@ impl AnalysisResult {
                 disp.rotation.z
             )?;
         }
-        
+
         Ok(())
     }
 
     pub fn export_reactions_csv(&self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let mut file = std::fs::File::create(path)?;
-        
-        writeln!(file, "SupportID,NodeID,FX(N),FY(N),FZ(N),MX(Nm),MY(Nm),MZ(Nm)")?;
-        
+
+        writeln!(
+            file,
+            "SupportID,NodeID,FX(N),FY(N),FZ(N),MX(Nm),MY(Nm),MZ(Nm)"
+        )?;
+
         for reaction in &self.reactions {
             writeln!(
                 file,
@@ -45,7 +48,7 @@ impl AnalysisResult {
                 reaction.moment.z
             )?;
         }
-        
+
         Ok(())
     }
 
@@ -66,7 +69,7 @@ impl AnalysisResult {
             })?;
 
         let mut file = std::fs::File::create(path)?;
-        
+
         writeln!(
             file,
             "Position(m),Axial(N),ShearY(N),ShearZ(N),MomentY(Nm),MomentZ(Nm),Torsion(Nm)"

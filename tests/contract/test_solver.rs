@@ -1,6 +1,6 @@
 use approx::assert_relative_eq;
-use fe_engine::prelude::*;
 use fe_engine::analysis::{auto_select_solver, create_solver, is_gpu_available, SolverBackend};
+use fe_engine::prelude::*;
 
 #[test]
 fn test_solver_satisfies_ku_equals_f() {
@@ -33,8 +33,16 @@ fn test_solver_satisfies_ku_equals_f() {
         torsion_constant: 1.0e-6,
     };
 
-    let n0 = builder.add_node(Point3D { x: 0.0, y: 0.0, z: 0.0 });
-    let n1 = builder.add_node(Point3D { x: 5.0, y: 0.0, z: 0.0 });
+    let n0 = builder.add_node(Point3D {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    let n1 = builder.add_node(Point3D {
+        x: 5.0,
+        y: 0.0,
+        z: 0.0,
+    });
 
     builder.add_beam_element(n0, n1, 0, section).unwrap();
 
@@ -44,7 +52,11 @@ fn test_solver_satisfies_ku_equals_f() {
         .create_load_case("Point Load", LoadType::Live)
         .add_nodal_force(
             n1,
-            Vector3D { x: 0.0, y: 0.0, z: -1000.0 },
+            Vector3D {
+                x: 0.0,
+                y: 0.0,
+                z: -1000.0,
+            },
             Vector3D::zero(),
         )
         .unwrap()
@@ -64,7 +76,11 @@ fn test_solver_satisfies_ku_equals_f() {
     assert_relative_eq!(total_force.z.abs(), 1000.0, epsilon = 1e-6);
 
     let expected_moment = 1000.0 * 5.0;
-    assert_relative_eq!(total_moment.y.abs(), expected_moment, epsilon = expected_moment * 1e-6);
+    assert_relative_eq!(
+        total_moment.y.abs(),
+        expected_moment,
+        epsilon = expected_moment * 1e-6
+    );
 }
 
 #[test]
@@ -76,7 +92,9 @@ fn test_displacement_boundary_conditions_enforced() {
         name: "Concrete".to_string(),
         material_type: MaterialType::Concrete {
             grade: ConcreteGrade {
-                standard: ConcreteStandard::Eurocode2 { grade: "C30/37".to_string() },
+                standard: ConcreteStandard::Eurocode2 {
+                    grade: "C30/37".to_string(),
+                },
                 characteristic_strength: 30e6,
             },
         },
@@ -96,8 +114,16 @@ fn test_displacement_boundary_conditions_enforced() {
         torsion_constant: 1.0e-6,
     };
 
-    let n0 = builder.add_node(Point3D { x: 0.0, y: 0.0, z: 0.0 });
-    let n1 = builder.add_node(Point3D { x: 10.0, y: 0.0, z: 0.0 });
+    let n0 = builder.add_node(Point3D {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    });
+    let n1 = builder.add_node(Point3D {
+        x: 10.0,
+        y: 0.0,
+        z: 0.0,
+    });
 
     builder.add_beam_element(n0, n1, 0, section).unwrap();
 
@@ -105,7 +131,15 @@ fn test_displacement_boundary_conditions_enforced() {
 
     builder
         .create_load_case("Load", LoadType::Live)
-        .add_nodal_force(n1, Vector3D { x: 1000.0, y: 0.0, z: 0.0 }, Vector3D::zero())
+        .add_nodal_force(
+            n1,
+            Vector3D {
+                x: 1000.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Vector3D::zero(),
+        )
         .unwrap()
         .finish();
 
