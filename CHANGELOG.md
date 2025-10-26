@@ -15,8 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Core structural model with nodes, elements, materials, and loads
 - Model builder API for fluent model construction
 - Comprehensive validation system
-- CPU-based linear solver using Cholesky decomposition
-- Experimental GPU solver for macOS (Metal)
+- **CPU Cholesky solver** (stable, production-ready)
+- **Experimental GPU solver** for macOS Metal (not recommended for production)
 - Beam and Frame2D element types
 - Support for multiple material standards (Eurocode, AISC, BS, ACI)
 - Multiple load case support (dead, live, wind, seismic, thermal)
@@ -37,8 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Analysis
 - Linear static analysis
-- CPU solver with Cholesky decomposition
-- Optional GPU acceleration (macOS Metal)
+- **CPU Cholesky solver** (stable, production-ready, recommended for all use)
+- **Experimental GPU solver** for macOS Metal (not recommended - 8-10× slower than CPU)
 - Deflection limit checking
 - Reaction force calculation
 

@@ -115,8 +115,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ Model created: {} nodes, {} elements", 
              model.nodes.len(), model.elements.len());
 
-    // Step 9: Run analysis
-    let solver = CpuCholesky;
+    // Step 9: Run analysis with CPU Cholesky solver (recommended)
+    let solver = CpuCholesky;  // ✅ Always use this for production
     let mut pipeline = AnalysisPipeline::new(&model);
     let result = pipeline.run(&solver, &model.load_cases[0])?;
 
@@ -171,6 +171,22 @@ Total reactions:
 ```
 
 ## Understanding the Code
+
+### Solver Selection
+
+**Always use `CpuCholesky` for production work:**
+
+```rust
+let solver = CpuCholesky;  // ✅ Stable, fast, reliable
+```
+
+The `CpuCholesky` solver is:
+- **Recommended for all production use**
+- Direct solver providing exact solutions (within numerical precision)
+- Efficient for models up to ~50,000 DOF
+- Well-tested and stable
+
+**Do not use GPU solver** - it's experimental and currently 8-10× slower than CPU. See the main [README](../../README.md#solvers) for detailed comparison.
 
 ### Model Builder Pattern
 
