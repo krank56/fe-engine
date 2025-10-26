@@ -7,7 +7,7 @@ use crate::analysis::result::{
     AnalysisResult, ModelSnapshot, NodalDisplacement, SolverBackend, SolverInfo,
 };
 use crate::analysis::solver::LinearSolver;
-use crate::audit::trail::{AuditTrail, AuditEntry, AuditValue};
+use crate::audit::trail::{AuditTrail, AuditValue};
 use crate::structure::geometry::Vector3D;
 use crate::structure::load::LoadCase;
 use crate::structure::model::StructuralModel;

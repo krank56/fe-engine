@@ -2,7 +2,7 @@ use nalgebra::DVector;
 use nalgebra_sparse::CsrMatrix;
 use std::collections::HashMap;
 
-use crate::analysis::elements::beam::BeamElement;
+use crate::analysis::elements::beam::{BeamElement, BeamProperties};
 use crate::analysis::elements::frame2d::Frame2DElement;
 use crate::structure::element::{ElementType, Plane};
 use crate::structure::load::{LoadCase, LoadDistribution};
@@ -93,15 +93,18 @@ impl GlobalAssembler {
                 }
                 ElementType::Beam1D { .. } | ElementType::Frame3D => {
                     let shear_modulus = material.elastic_modulus / (2.0 * (1.0 + material.poisson_ratio));
+                    let props = BeamProperties {
+                        elastic_modulus: material.elastic_modulus,
+                        shear_modulus,
+                        area: element.section.area,
+                        inertia_y: element.section.inertia_y,
+                        inertia_z: element.section.inertia_z,
+                        torsion_constant: element.section.torsion_constant,
+                    };
                     let beam = BeamElement::new(
                         &node_i.coordinates,
                         &node_j.coordinates,
-                        material.elastic_modulus,
-                        shear_modulus,
-                        element.section.area,
-                        element.section.inertia_y,
-                        element.section.inertia_z,
-                        element.section.torsion_constant,
+                        &props,
                     );
 
                     let k_elem = beam.global_stiffness_matrix(&node_i.coordinates, &node_j.coordinates);
@@ -243,52 +246,49 @@ impl GlobalAssembler {
                 }
                 crate::structure::load::Load::ElementLoad {
                     element_id,
-                    load_distribution,
-                } => match load_distribution {
-                    LoadDistribution::UniformDistributed {
+                    load_distribution: LoadDistribution::UniformDistributed {
                         intensity,
                         direction,
-                    } => {
-                        let element = &model.elements[*element_id];
-                        let node_i_id = element.connectivity[0];
-                        let node_j_id = element.connectivity[1];
+                    },
+                } => {
+                    let element = &model.elements[*element_id];
+                    let node_i_id = element.connectivity[0];
+                    let node_j_id = element.connectivity[1];
 
-                        let node_i = &model.nodes[node_i_id];
-                        let node_j = &model.nodes[node_j_id];
+                    let node_i = &model.nodes[node_i_id];
+                    let node_j = &model.nodes[node_j_id];
 
-                        let dx = node_j.coordinates.x - node_i.coordinates.x;
-                        let dy = node_j.coordinates.y - node_i.coordinates.y;
-                        let dz = node_j.coordinates.z - node_i.coordinates.z;
-                        let length = (dx * dx + dy * dy + dz * dz).sqrt();
+                    let dx = node_j.coordinates.x - node_i.coordinates.x;
+                    let dy = node_j.coordinates.y - node_i.coordinates.y;
+                    let dz = node_j.coordinates.z - node_i.coordinates.z;
+                    let length = (dx * dx + dy * dy + dz * dz).sqrt();
 
-                        let total_force_x = intensity * direction.x * length;
-                        let total_force_y = intensity * direction.y * length;
-                        let total_force_z = intensity * direction.z * length;
+                    let total_force_x = intensity * direction.x * length;
+                    let total_force_y = intensity * direction.y * length;
+                    let total_force_z = intensity * direction.z * length;
 
-                        let nodal_force_x = total_force_x / 2.0;
-                        let nodal_force_y = total_force_y / 2.0;
-                        let nodal_force_z = total_force_z / 2.0;
+                    let nodal_force_x = total_force_x / 2.0;
+                    let nodal_force_y = total_force_y / 2.0;
+                    let nodal_force_z = total_force_z / 2.0;
 
-                        let fem_y = -(intensity * direction.z * length * length) / 12.0;
-                        let fem_z = (intensity * direction.y * length * length) / 12.0;
+                    let fem_y = -(intensity * direction.z * length * length) / 12.0;
+                    let fem_z = (intensity * direction.y * length * length) / 12.0;
 
-                        let dof_i = node_i_id * 6;
-                        let dof_j = node_j_id * 6;
+                    let dof_i = node_i_id * 6;
+                    let dof_j = node_j_id * 6;
 
-                        f[dof_i] += nodal_force_x;
-                        f[dof_i + 1] += nodal_force_y;
-                        f[dof_i + 2] += nodal_force_z;
-                        f[dof_i + 4] += fem_y;
-                        f[dof_i + 5] += fem_z;
+                    f[dof_i] += nodal_force_x;
+                    f[dof_i + 1] += nodal_force_y;
+                    f[dof_i + 2] += nodal_force_z;
+                    f[dof_i + 4] += fem_y;
+                    f[dof_i + 5] += fem_z;
 
-                        f[dof_j] += nodal_force_x;
-                        f[dof_j + 1] += nodal_force_y;
-                        f[dof_j + 2] += nodal_force_z;
-                        f[dof_j + 4] -= fem_y;
-                        f[dof_j + 5] -= fem_z;
-                    }
-                    _ => {}
-                },
+                    f[dof_j] += nodal_force_x;
+                    f[dof_j + 1] += nodal_force_y;
+                    f[dof_j + 2] += nodal_force_z;
+                    f[dof_j + 4] -= fem_y;
+                    f[dof_j + 5] -= fem_z;
+                }
                 _ => {}
             }
         }
@@ -392,15 +392,18 @@ impl GlobalAssembler {
                     let node_j = &model.nodes[element.connectivity[1]];
 
                     let shear_modulus = material.elastic_modulus / (2.0 * (1.0 + material.poisson_ratio));
+                    let props = BeamProperties {
+                        elastic_modulus: material.elastic_modulus,
+                        shear_modulus,
+                        area: element.section.area,
+                        inertia_y: element.section.inertia_y,
+                        inertia_z: element.section.inertia_z,
+                        torsion_constant: element.section.torsion_constant,
+                    };
                     let beam = BeamElement::new(
                         &node_i.coordinates,
                         &node_j.coordinates,
-                        material.elastic_modulus,
-                        shear_modulus,
-                        element.section.area,
-                        element.section.inertia_y,
-                        element.section.inertia_z,
-                        element.section.torsion_constant,
+                        &props,
                     );
 
                     let dof_i = element.connectivity[0] * 6;

@@ -38,10 +38,9 @@ pub fn create_solver(backend: crate::analysis::result::SolverBackend) -> Box<dyn
 }
 
 pub fn auto_select_solver(num_dofs: usize) -> crate::analysis::result::SolverBackend {
-    const GPU_THRESHOLD: usize = 5000;
-    
     #[cfg(all(target_os = "macos", feature = "gpu"))]
     {
+        const GPU_THRESHOLD: usize = 5000;
         if num_dofs >= GPU_THRESHOLD && MetalPCG::new().is_ok() {
             return crate::analysis::result::SolverBackend::GpuIterative;
         }

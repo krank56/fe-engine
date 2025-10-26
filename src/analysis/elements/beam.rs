@@ -1,6 +1,15 @@
-use nalgebra::{Matrix6, SMatrix, Vector3};
+use nalgebra::SMatrix;
 
-use crate::structure::geometry::{Point3D, Vector3D};
+use crate::structure::geometry::Point3D;
+
+pub struct BeamProperties {
+    pub elastic_modulus: f64,
+    pub shear_modulus: f64,
+    pub area: f64,
+    pub inertia_y: f64,
+    pub inertia_z: f64,
+    pub torsion_constant: f64,
+}
 
 pub struct BeamElement {
     pub length: f64,
@@ -16,12 +25,7 @@ impl BeamElement {
     pub fn new(
         node_i: &Point3D,
         node_j: &Point3D,
-        elastic_modulus: f64,
-        shear_modulus: f64,
-        area: f64,
-        inertia_y: f64,
-        inertia_z: f64,
-        torsion_constant: f64,
+        props: &BeamProperties,
     ) -> Self {
         let dx = node_j.x - node_i.x;
         let dy = node_j.y - node_i.y;
@@ -30,12 +34,12 @@ impl BeamElement {
 
         Self {
             length,
-            area,
-            elastic_modulus,
-            shear_modulus,
-            inertia_y,
-            inertia_z,
-            torsion_constant,
+            area: props.area,
+            elastic_modulus: props.elastic_modulus,
+            shear_modulus: props.shear_modulus,
+            inertia_y: props.inertia_y,
+            inertia_z: props.inertia_z,
+            torsion_constant: props.torsion_constant,
         }
     }
 
@@ -188,7 +192,15 @@ mod tests {
         let a = 0.01;
         let i = 8.333e-6;
 
-        let beam = BeamElement::new(&node_i, &node_j, e, e / (2.0 * 1.3), a, i, i, 1.0e-6);
+        let props = BeamProperties {
+            elastic_modulus: e,
+            shear_modulus: e / (2.0 * 1.3),
+            area: a,
+            inertia_y: i,
+            inertia_z: i,
+            torsion_constant: 1.0e-6,
+        };
+        let beam = BeamElement::new(&node_i, &node_j, &props);
 
         assert_relative_eq!(beam.length, 10.0, epsilon = 1e-9);
 
