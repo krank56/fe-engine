@@ -71,38 +71,100 @@ impl<'a> AnalysisPipeline<'a> {
 
         let f_original = f.clone();
 
-        self.audit_trail.append_with_details(
-            "apply_boundary_conditions",
-            vec![(
-                "num_supports".to_string(),
-                AuditValue::Integer(self.model.supports.len() as i64),
-            )],
-        );
-        GlobalAssembler::apply_boundary_conditions(&mut k, &mut f, self.model);
+        // Check solver's boundary condition strategy
+        use crate::analysis::solver::BcStrategy;
+        let bc_strategy = solver.boundary_condition_strategy();
 
-        self.audit_trail.append_with_details(
-            "solve_linear_system",
-            vec![
-                (
-                    "solver".to_string(),
-                    AuditValue::String(solver.name().to_string()),
-                ),
-                ("dofs".to_string(), AuditValue::Integer(f.len() as i64)),
-            ],
-        );
-        let start = Instant::now();
-        let u = solver.solve(&k, &f)?;
-        let solve_time = start.elapsed();
-        self.audit_trail.append_with_details(
-            "linear_system_solved",
-            vec![
-                (
-                    "solve_time_ms".to_string(),
-                    AuditValue::Float(solve_time.as_secs_f64() * 1000.0),
-                ),
-                ("displacement_norm".to_string(), AuditValue::Float(u.norm())),
-            ],
-        );
+        let result = match bc_strategy {
+            BcStrategy::Elimination => {
+                // Traditional approach: reduce system by eliminating constrained DOFs
+                self.audit_trail.append_with_details(
+                    "apply_boundary_conditions",
+                    vec![
+                        (
+                            "num_supports".to_string(),
+                            AuditValue::Integer(self.model.supports.len() as i64),
+                        ),
+                        ("strategy".to_string(), AuditValue::String("Elimination".to_string())),
+                    ],
+                );
+                GlobalAssembler::apply_boundary_conditions(&mut k, &mut f, self.model);
+
+                self.audit_trail.append_with_details(
+                    "solve_linear_system",
+                    vec![
+                        (
+                            "solver".to_string(),
+                            AuditValue::String(solver.name().to_string()),
+                        ),
+                        ("dofs".to_string(), AuditValue::Integer(f.len() as i64)),
+                    ],
+                );
+                let start = Instant::now();
+                let u = solver.solve(&k, &f, None)?;
+                let elapsed = start.elapsed();
+                self.audit_trail.append_with_details(
+                    "linear_system_solved",
+                    vec![
+                        (
+                            "solve_time_ms".to_string(),
+                            AuditValue::Float(elapsed.as_secs_f64() * 1000.0),
+                        ),
+                        ("displacement_norm".to_string(), AuditValue::Float(u.norm())),
+                    ],
+                );
+                (u, elapsed)
+            }
+
+            BcStrategy::Penalty => {
+                // Matrix-free approach: work with full system using penalty method
+                self.audit_trail.append_with_details(
+                    "prepare_boundary_conditions",
+                    vec![
+                        (
+                            "num_supports".to_string(),
+                            AuditValue::Integer(self.model.supports.len() as i64),
+                        ),
+                        ("strategy".to_string(), AuditValue::String("Penalty".to_string())),
+                    ],
+                );
+
+                // Build BC info for solver
+                use crate::analysis::solver::BoundaryConditions;
+                let total_dofs = self.model.nodes.len() * 6;
+                let bc = BoundaryConditions::from_supports(self.model.supports.clone(), total_dofs);
+
+                // Penalty method: pass FULL system (not reduced)
+                // Solver handles constraints internally via penalty method
+                self.audit_trail.append_with_details(
+                    "solve_linear_system",
+                    vec![
+                        (
+                            "solver".to_string(),
+                            AuditValue::String(solver.name().to_string()),
+                        ),
+                        ("total_dofs".to_string(), AuditValue::Integer(total_dofs as i64)),
+                        ("constrained_dofs".to_string(), AuditValue::Integer(bc.constrained_dofs.len() as i64)),
+                    ],
+                );
+                let start = Instant::now();
+                let u = solver.solve(&k, &f, Some(&bc))?;
+                let elapsed = start.elapsed();
+                self.audit_trail.append_with_details(
+                    "linear_system_solved",
+                    vec![
+                        (
+                            "solve_time_ms".to_string(),
+                            AuditValue::Float(elapsed.as_secs_f64() * 1000.0),
+                        ),
+                        ("displacement_norm".to_string(), AuditValue::Float(u.norm())),
+                    ],
+                );
+                (u, elapsed)
+            }
+        };
+
+        let (u, solve_time) = result;
 
         self.audit_trail.append_action("compute_element_forces");
         let element_forces = GlobalAssembler::recover_element_forces(self.model, &u);
