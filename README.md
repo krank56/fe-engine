@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo/logo-1024.png" alt="FE Engine Logo" width="200"/>
+</p>
+
 # FE Engine
 
 A high-performance finite element analysis (FEA) engine for structural engineering, built in Rust.
