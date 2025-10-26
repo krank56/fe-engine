@@ -45,7 +45,7 @@ pub enum SteelStandard {
     BAEL { grade: String },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CodeReference {
     pub standard: String,
     pub section: String,

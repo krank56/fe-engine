@@ -1,5 +1,4 @@
 use fe_engine::prelude::*;
-use std::path::PathBuf;
 use tempfile::TempDir;
 
 #[test]
@@ -151,4 +150,30 @@ fn create_simple_beam_model() -> StructuralModel {
         .finish();
 
     builder.build().unwrap()
+}
+
+#[test]
+fn test_markdown_report_contains_code_citations() {
+    let model = create_simple_beam_model();
+    let solver = CpuCholesky;
+    let load_case = &model.load_cases[0];
+
+    let mut pipeline = AnalysisPipeline::new(&model);
+    let result = pipeline.run(&solver, load_case).unwrap();
+
+    let temp_dir = TempDir::new().unwrap();
+    let md_path = temp_dir.path().join("report.md");
+
+    result.export_markdown_report(&md_path, &model, load_case, "en").unwrap();
+
+    assert!(md_path.exists());
+    let content = std::fs::read_to_string(&md_path).unwrap();
+
+    assert!(content.contains("EN 1992-1-1:2004"));
+    assert!(content.contains("Table 3.1"));
+    
+    assert!(content.contains("Concrete C30/37"));
+    
+    assert!(content.contains("§ 7.4.1"));
+    assert!(content.contains("L/250"));
 }
