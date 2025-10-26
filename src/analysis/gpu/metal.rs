@@ -204,9 +204,13 @@ impl MetalPCG {
         let max_iterations = n.max(1000);
         let tolerance = 1e-5f32;
 
+        // Use fixed 256 threadgroup size (power of 2 for efficient reduction)
+        let threadgroup_width = 256u64;
         let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(256.min(n as u64), 1, 1);
+        let threadgroup_size = metal::MTLSize::new(threadgroup_width, 1, 1);
+        let threadgroup_mem_size = (threadgroup_width * std::mem::size_of::<f32>() as u64) as u64;
 
+        // Initialization phase
         let command_buffer = self.command_queue.new_command_buffer();
         let encoder = command_buffer.new_compute_command_encoder();
 
@@ -228,148 +232,164 @@ impl MetalPCG {
         encoder.set_buffer(1, Some(&buf_z), 0);
         encoder.set_buffer(2, Some(&buf_dot_rz), 0);
         encoder.set_buffer(3, Some(&buf_n), 0);
+        encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
         encoder.dispatch_threads(grid_size, threadgroup_size);
 
         encoder.end_encoding();
         command_buffer.commit();
         command_buffer.wait_until_completed();
 
-        for iter in 0..max_iterations {
+        // Main PCG iteration loop - batch iterations to reduce synchronization
+        let batch_size = 10;
+        for batch_start in (0..max_iterations).step_by(batch_size) {
             let command_buffer = self.command_queue.new_command_buffer();
             let encoder = command_buffer.new_compute_command_encoder();
 
-            encoder.set_compute_pipeline_state(&self.pipeline_zero_scalar);
-            encoder.set_buffer(0, Some(&buf_dot_pap), 0);
             let single_thread = metal::MTLSize::new(1, 1, 1);
-            encoder.dispatch_threads(single_thread, single_thread);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_zero_scalar);
-            encoder.set_buffer(0, Some(&buf_dot_rz_new), 0);
-            encoder.dispatch_threads(single_thread, single_thread);
+            for _iter_in_batch in 0..batch_size.min(max_iterations - batch_start) {
+                // Zero reduction buffers
+                encoder.set_compute_pipeline_state(&self.pipeline_zero_scalar);
+                encoder.set_buffer(0, Some(&buf_dot_pap), 0);
+                encoder.dispatch_threads(single_thread, single_thread);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_spmv);
-            encoder.set_buffer(0, Some(&buf_values), 0);
-            encoder.set_buffer(1, Some(&buf_col_indices), 0);
-            encoder.set_buffer(2, Some(&buf_row_offsets), 0);
-            encoder.set_buffer(3, Some(&buf_p), 0);
-            encoder.set_buffer(4, Some(&buf_ap), 0);
-            encoder.set_buffer(5, Some(&buf_n), 0);
-            encoder.dispatch_threads(grid_size, threadgroup_size);
+                encoder.set_compute_pipeline_state(&self.pipeline_zero_scalar);
+                encoder.set_buffer(0, Some(&buf_dot_rz_new), 0);
+                encoder.dispatch_threads(single_thread, single_thread);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
-            encoder.set_buffer(0, Some(&buf_p), 0);
-            encoder.set_buffer(1, Some(&buf_ap), 0);
-            encoder.set_buffer(2, Some(&buf_dot_pap), 0);
-            encoder.set_buffer(3, Some(&buf_n), 0);
-            encoder.dispatch_threads(grid_size, threadgroup_size);
+                // SpMV: ap = A * p
+                encoder.set_compute_pipeline_state(&self.pipeline_spmv);
+                encoder.set_buffer(0, Some(&buf_values), 0);
+                encoder.set_buffer(1, Some(&buf_col_indices), 0);
+                encoder.set_buffer(2, Some(&buf_row_offsets), 0);
+                encoder.set_buffer(3, Some(&buf_p), 0);
+                encoder.set_buffer(4, Some(&buf_ap), 0);
+                encoder.set_buffer(5, Some(&buf_n), 0);
+                encoder.dispatch_threads(grid_size, threadgroup_size);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_compute_alpha_beta);
-            encoder.set_buffer(0, Some(&buf_dot_rz), 0);
-            encoder.set_buffer(1, Some(&buf_dot_pap), 0);
-            encoder.set_buffer(2, Some(&buf_dot_rz_new), 0);
-            encoder.set_buffer(3, Some(&buf_alpha), 0);
-            encoder.set_buffer(4, Some(&buf_beta), 0);
-            encoder.set_buffer(5, Some(&buf_rz_old), 0);
-            encoder.set_buffer(6, Some(&buf_stage0), 0);
-            let single_thread = metal::MTLSize::new(1, 1, 1);
-            encoder.dispatch_threads(single_thread, single_thread);
+                // Dot product: p · ap (with parallel reduction)
+                encoder.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
+                encoder.set_buffer(0, Some(&buf_p), 0);
+                encoder.set_buffer(1, Some(&buf_ap), 0);
+                encoder.set_buffer(2, Some(&buf_dot_pap), 0);
+                encoder.set_buffer(3, Some(&buf_n), 0);
+                encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
+                encoder.dispatch_threads(grid_size, threadgroup_size);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_pcg_update_vectors);
-            encoder.set_buffer(0, Some(&buf_alpha), 0);
-            encoder.set_buffer(1, Some(&buf_beta), 0);
-            encoder.set_buffer(2, Some(&buf_diag), 0);
-            encoder.set_buffer(3, Some(&buf_x), 0);
-            encoder.set_buffer(4, Some(&buf_r), 0);
-            encoder.set_buffer(5, Some(&buf_z), 0);
-            encoder.set_buffer(6, Some(&buf_p), 0);
-            encoder.set_buffer(7, Some(&buf_ap), 0);
-            encoder.set_buffer(8, Some(&buf_n), 0);
-            encoder.set_buffer(9, Some(&buf_stage0), 0);
-            encoder.dispatch_threads(grid_size, threadgroup_size);
+                // Compute alpha
+                encoder.set_compute_pipeline_state(&self.pipeline_compute_alpha_beta);
+                encoder.set_buffer(0, Some(&buf_dot_rz), 0);
+                encoder.set_buffer(1, Some(&buf_dot_pap), 0);
+                encoder.set_buffer(2, Some(&buf_dot_rz_new), 0);
+                encoder.set_buffer(3, Some(&buf_alpha), 0);
+                encoder.set_buffer(4, Some(&buf_beta), 0);
+                encoder.set_buffer(5, Some(&buf_rz_old), 0);
+                encoder.set_buffer(6, Some(&buf_stage0), 0);
+                encoder.dispatch_threads(single_thread, single_thread);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_pcg_update_vectors);
-            encoder.set_buffer(0, Some(&buf_alpha), 0);
-            encoder.set_buffer(1, Some(&buf_beta), 0);
-            encoder.set_buffer(2, Some(&buf_diag), 0);
-            encoder.set_buffer(3, Some(&buf_x), 0);
-            encoder.set_buffer(4, Some(&buf_r), 0);
-            encoder.set_buffer(5, Some(&buf_z), 0);
-            encoder.set_buffer(6, Some(&buf_p), 0);
-            encoder.set_buffer(7, Some(&buf_ap), 0);
-            encoder.set_buffer(8, Some(&buf_n), 0);
-            encoder.set_buffer(9, Some(&buf_stage1), 0);
-            encoder.dispatch_threads(grid_size, threadgroup_size);
+                // Update x and r
+                encoder.set_compute_pipeline_state(&self.pipeline_pcg_update_vectors);
+                encoder.set_buffer(0, Some(&buf_alpha), 0);
+                encoder.set_buffer(1, Some(&buf_beta), 0);
+                encoder.set_buffer(2, Some(&buf_diag), 0);
+                encoder.set_buffer(3, Some(&buf_x), 0);
+                encoder.set_buffer(4, Some(&buf_r), 0);
+                encoder.set_buffer(5, Some(&buf_z), 0);
+                encoder.set_buffer(6, Some(&buf_p), 0);
+                encoder.set_buffer(7, Some(&buf_ap), 0);
+                encoder.set_buffer(8, Some(&buf_n), 0);
+                encoder.set_buffer(9, Some(&buf_stage0), 0);
+                encoder.dispatch_threads(grid_size, threadgroup_size);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
-            encoder.set_buffer(0, Some(&buf_r), 0);
-            encoder.set_buffer(1, Some(&buf_z), 0);
-            encoder.set_buffer(2, Some(&buf_dot_rz_new), 0);
-            encoder.set_buffer(3, Some(&buf_n), 0);
-            encoder.dispatch_threads(grid_size, threadgroup_size);
+                // Precondition: z = M^-1 * r
+                encoder.set_compute_pipeline_state(&self.pipeline_pcg_update_vectors);
+                encoder.set_buffer(0, Some(&buf_alpha), 0);
+                encoder.set_buffer(1, Some(&buf_beta), 0);
+                encoder.set_buffer(2, Some(&buf_diag), 0);
+                encoder.set_buffer(3, Some(&buf_x), 0);
+                encoder.set_buffer(4, Some(&buf_r), 0);
+                encoder.set_buffer(5, Some(&buf_z), 0);
+                encoder.set_buffer(6, Some(&buf_p), 0);
+                encoder.set_buffer(7, Some(&buf_ap), 0);
+                encoder.set_buffer(8, Some(&buf_n), 0);
+                encoder.set_buffer(9, Some(&buf_stage1), 0);
+                encoder.dispatch_threads(grid_size, threadgroup_size);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_compute_alpha_beta);
-            encoder.set_buffer(0, Some(&buf_dot_rz), 0);
-            encoder.set_buffer(1, Some(&buf_dot_pap), 0);
-            encoder.set_buffer(2, Some(&buf_dot_rz_new), 0);
-            encoder.set_buffer(3, Some(&buf_alpha), 0);
-            encoder.set_buffer(4, Some(&buf_beta), 0);
-            encoder.set_buffer(5, Some(&buf_rz_old), 0);
-            encoder.set_buffer(6, Some(&buf_stage1), 0);
-            encoder.dispatch_threads(single_thread, single_thread);
+                // Dot product: r · z (with parallel reduction)
+                encoder.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
+                encoder.set_buffer(0, Some(&buf_r), 0);
+                encoder.set_buffer(1, Some(&buf_z), 0);
+                encoder.set_buffer(2, Some(&buf_dot_rz_new), 0);
+                encoder.set_buffer(3, Some(&buf_n), 0);
+                encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
+                encoder.dispatch_threads(grid_size, threadgroup_size);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_pcg_update_vectors);
-            encoder.set_buffer(0, Some(&buf_alpha), 0);
-            encoder.set_buffer(1, Some(&buf_beta), 0);
-            encoder.set_buffer(2, Some(&buf_diag), 0);
-            encoder.set_buffer(3, Some(&buf_x), 0);
-            encoder.set_buffer(4, Some(&buf_r), 0);
-            encoder.set_buffer(5, Some(&buf_z), 0);
-            encoder.set_buffer(6, Some(&buf_p), 0);
-            encoder.set_buffer(7, Some(&buf_ap), 0);
-            encoder.set_buffer(8, Some(&buf_n), 0);
-            encoder.set_buffer(9, Some(&buf_stage2), 0);
-            encoder.dispatch_threads(grid_size, threadgroup_size);
+                // Compute beta
+                encoder.set_compute_pipeline_state(&self.pipeline_compute_alpha_beta);
+                encoder.set_buffer(0, Some(&buf_dot_rz), 0);
+                encoder.set_buffer(1, Some(&buf_dot_pap), 0);
+                encoder.set_buffer(2, Some(&buf_dot_rz_new), 0);
+                encoder.set_buffer(3, Some(&buf_alpha), 0);
+                encoder.set_buffer(4, Some(&buf_beta), 0);
+                encoder.set_buffer(5, Some(&buf_rz_old), 0);
+                encoder.set_buffer(6, Some(&buf_stage1), 0);
+                encoder.dispatch_threads(single_thread, single_thread);
 
-            encoder.set_compute_pipeline_state(&self.pipeline_copy_scalar);
-            encoder.set_buffer(0, Some(&buf_dot_rz_new), 0);
-            encoder.set_buffer(1, Some(&buf_dot_rz), 0);
-            encoder.dispatch_threads(single_thread, single_thread);
+                // Update p
+                encoder.set_compute_pipeline_state(&self.pipeline_pcg_update_vectors);
+                encoder.set_buffer(0, Some(&buf_alpha), 0);
+                encoder.set_buffer(1, Some(&buf_beta), 0);
+                encoder.set_buffer(2, Some(&buf_diag), 0);
+                encoder.set_buffer(3, Some(&buf_x), 0);
+                encoder.set_buffer(4, Some(&buf_r), 0);
+                encoder.set_buffer(5, Some(&buf_z), 0);
+                encoder.set_buffer(6, Some(&buf_p), 0);
+                encoder.set_buffer(7, Some(&buf_ap), 0);
+                encoder.set_buffer(8, Some(&buf_n), 0);
+                encoder.set_buffer(9, Some(&buf_stage2), 0);
+                encoder.dispatch_threads(grid_size, threadgroup_size);
+
+                // Copy rz_new to rz
+                encoder.set_compute_pipeline_state(&self.pipeline_copy_scalar);
+                encoder.set_buffer(0, Some(&buf_dot_rz_new), 0);
+                encoder.set_buffer(1, Some(&buf_dot_rz), 0);
+                encoder.dispatch_threads(single_thread, single_thread);
+            }
 
             encoder.end_encoding();
             command_buffer.commit();
+            command_buffer.wait_until_completed();
 
-            if iter % 100 == 0 {
-                command_buffer.wait_until_completed();
+            // Check convergence less frequently (every batch instead of every 100 iters)
+            let command_buffer2 = self.command_queue.new_command_buffer();
+            let encoder2 = command_buffer2.new_compute_command_encoder();
 
-                let command_buffer2 = self.command_queue.new_command_buffer();
-                let encoder2 = command_buffer2.new_compute_command_encoder();
+            encoder2.set_compute_pipeline_state(&self.pipeline_zero_scalar);
+            encoder2.set_buffer(0, Some(&buf_residual_norm), 0);
+            let single_thread = metal::MTLSize::new(1, 1, 1);
+            encoder2.dispatch_threads(single_thread, single_thread);
 
-                encoder2.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
-                encoder2.set_buffer(0, Some(&buf_r), 0);
-                encoder2.set_buffer(1, Some(&buf_r), 0);
-                encoder2.set_buffer(2, Some(&buf_residual_norm), 0);
-                encoder2.set_buffer(3, Some(&buf_n), 0);
-                encoder2.dispatch_threads(grid_size, threadgroup_size);
+            encoder2.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
+            encoder2.set_buffer(0, Some(&buf_r), 0);
+            encoder2.set_buffer(1, Some(&buf_r), 0);
+            encoder2.set_buffer(2, Some(&buf_residual_norm), 0);
+            encoder2.set_buffer(3, Some(&buf_n), 0);
+            encoder2.set_threadgroup_memory_length(0, threadgroup_mem_size);
+            encoder2.dispatch_threads(grid_size, threadgroup_size);
 
-                encoder2.end_encoding();
-                command_buffer2.commit();
-                command_buffer2.wait_until_completed();
+            encoder2.end_encoding();
+            command_buffer2.commit();
+            command_buffer2.wait_until_completed();
 
-                let residual_norm = unsafe {
-                    let ptr = buf_residual_norm.contents() as *const f32;
-                    (*ptr).sqrt()
-                };
+            let residual_norm = unsafe {
+                let ptr = buf_residual_norm.contents() as *const f32;
+                (*ptr).sqrt()
+            };
 
-                if residual_norm < tolerance {
-                    let mut x_result = vec![0.0; n];
-                    self.copy_buffer_f32_to_vec_f64(&buf_x, &mut x_result, n);
-                    return Ok(DVector::from_vec(x_result));
-                }
-
-                unsafe {
-                    let ptr = buf_residual_norm.contents() as *mut f32;
-                    *ptr = 0.0;
-                }
+            if residual_norm < tolerance {
+                let mut x_result = vec![0.0; n];
+                self.copy_buffer_f32_to_vec_f64(&buf_x, &mut x_result, n);
+                return Ok(DVector::from_vec(x_result));
             }
         }
 
@@ -520,9 +540,13 @@ impl MetalPCG {
         encoder.set_buffer(2, Some(&buf_partial), 0);
         encoder.set_buffer(3, Some(&buf_n), 0);
 
+        // Use fixed 256 threadgroup size (power of 2 for efficient reduction)
+        let threadgroup_width = 256u64;
         let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(256, 1, 1);
+        let threadgroup_size = metal::MTLSize::new(threadgroup_width, 1, 1);
+        let threadgroup_mem_size = (threadgroup_width * std::mem::size_of::<f32>() as u64) as u64;
 
+        encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
         encoder.dispatch_threads(grid_size, threadgroup_size);
         encoder.end_encoding();
 
@@ -642,9 +666,13 @@ impl MetalPCG {
         encoder.set_buffer(1, Some(&buf_partial), 0);
         encoder.set_buffer(2, Some(&buf_n), 0);
 
+        // Use fixed 256 threadgroup size (power of 2 for efficient reduction)
+        let threadgroup_width = 256u64;
         let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(256, 1, 1);
+        let threadgroup_size = metal::MTLSize::new(threadgroup_width, 1, 1);
+        let threadgroup_mem_size = (threadgroup_width * std::mem::size_of::<f32>() as u64) as u64;
 
+        encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
         encoder.dispatch_threads(grid_size, threadgroup_size);
         encoder.end_encoding();
 
@@ -697,9 +725,18 @@ impl MetalPCG {
 }
 
 impl LinearSolver for MetalPCG {
-    fn solve(&self, k: &CsrMatrix<f64>, f: &DVector<f64>) -> Result<DVector<f64>, SolverError> {
+    fn solve(
+        &self,
+        k: &CsrMatrix<f64>,
+        f: &DVector<f64>,
+        _bc: Option<&crate::analysis::solver::BoundaryConditions>,
+    ) -> Result<DVector<f64>, SolverError> {
+        // GPU Sparse PCG uses elimination strategy
+        // BC parameter is ignored - pipeline already reduced the system
+
         #[cfg(feature = "gpu")]
         {
+            // Use optimized batched version
             self.gpu_pcg_solve_resident(k, f)
         }
 
@@ -713,6 +750,8 @@ impl LinearSolver for MetalPCG {
     }
 
     fn name(&self) -> &str {
-        "Metal PCG (GPU-Resident)"
+        "Metal PCG (GPU-Optimized)"
     }
+
+    // Uses default BcStrategy::Elimination
 }

@@ -8,7 +8,15 @@ use crate::analysis::SolverError;
 pub struct CpuCholesky;
 
 impl LinearSolver for CpuCholesky {
-    fn solve(&self, k: &CsrMatrix<f64>, f: &DVector<f64>) -> Result<DVector<f64>, SolverError> {
+    fn solve(
+        &self,
+        k: &CsrMatrix<f64>,
+        f: &DVector<f64>,
+        _bc: Option<&crate::analysis::solver::BoundaryConditions>,
+    ) -> Result<DVector<f64>, SolverError> {
+        // CPU Cholesky uses elimination strategy
+        // BC parameter is ignored - pipeline already reduced the system
+
         let coo = CooMatrix::from(k);
         let k_csc = CscMatrix::from(&coo);
 
@@ -26,6 +34,8 @@ impl LinearSolver for CpuCholesky {
     fn name(&self) -> &str {
         "CPU Cholesky (nalgebra-sparse)"
     }
+
+    // Uses default BcStrategy::Elimination
 }
 
 #[cfg(test)]
@@ -49,7 +59,7 @@ mod tests {
         let f = DVector::from_vec(vec![12.0, 17.0, 8.0]);
 
         let solver = CpuCholesky;
-        let u = solver.solve(&k, &f).unwrap();
+        let u = solver.solve(&k, &f, None).unwrap();
 
         let residual = &k * &u - &f;
         assert_relative_eq!(residual.norm(), 0.0, epsilon = 1e-9);
@@ -67,7 +77,7 @@ mod tests {
         let f = DVector::from_vec(vec![10.0, 7.0]);
 
         let solver = CpuCholesky;
-        let u = solver.solve(&k, &f).unwrap();
+        let u = solver.solve(&k, &f, None).unwrap();
 
         println!("Solution: {:?}", u);
         assert_relative_eq!(u[0], 2.0, epsilon = 1e-9);
