@@ -1,0 +1,4 @@
+warn-on-all-wildcard-imports = true
+disallowed-methods = [
+    { path = "std::panic::panic", reason = "use Result types instead" },
+]
