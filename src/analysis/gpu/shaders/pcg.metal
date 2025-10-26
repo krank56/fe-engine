@@ -1,6 +1,25 @@
 #include <metal_stdlib>
 using namespace metal;
 
+// Helper function for parallel reduction (handles non-power-of-2 threadgroup sizes)
+inline void parallel_reduce_sum(threadgroup float* shared_data, uint tid, uint tg_size) {
+    // Find largest power of 2 <= tg_size
+    uint s = 1;
+    while (s < tg_size) {
+        s <<= 1;
+    }
+    s >>= 1;
+
+    // Reduction loop
+    while (s > 0) {
+        if (tid < s && tid + s < tg_size) {
+            shared_data[tid] += shared_data[tid + s];
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        s >>= 1;
+    }
+}
+
 kernel void spmv_kernel(
     const device float* values [[buffer(0)]],
     const device int* col_indices [[buffer(1)]],
@@ -25,29 +44,62 @@ kernel void spmv_kernel(
     y[row] = sum;
 }
 
+// Parallel reduction for dot product using threadgroup memory
 kernel void dot_product_to_buffer_kernel(
     const device float* x [[buffer(0)]],
     const device float* y [[buffer(1)]],
-    device atomic_float* result [[buffer(2)]],
+    device float* result [[buffer(2)]],
     const device uint* n [[buffer(3)]],
-    uint gid [[thread_position_in_grid]]
+    uint gid [[thread_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    threadgroup float* shared_data [[threadgroup(0)]]
 ) {
+    // Load and compute product (all threads must participate)
+    float local_sum = 0.0f;
     if (gid < n[0]) {
-        float product = x[gid] * y[gid];
-        atomic_fetch_add_explicit(result, product, memory_order_relaxed);
+        local_sum = x[gid] * y[gid];
+    }
+
+    // Store to threadgroup memory and perform reduction
+    shared_data[tid] = local_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    parallel_reduce_sum(shared_data, tid, tg_size);
+
+    // First thread in each threadgroup writes result
+    if (tid == 0) {
+        atomic_fetch_add_explicit((device atomic_float*)&result[0], shared_data[0], memory_order_relaxed);
     }
 }
 
 kernel void dot_product_kernel(
     const device float* x [[buffer(0)]],
     const device float* y [[buffer(1)]],
-    device atomic_float* partial_sum [[buffer(2)]],
+    device float* partial_sum [[buffer(2)]],
     const device uint* n [[buffer(3)]],
-    uint gid [[thread_position_in_grid]]
+    uint gid [[thread_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]],
+    uint tg_id [[threadgroup_position_in_grid]],
+    threadgroup float* shared_data [[threadgroup(0)]]
 ) {
+    // Load and compute product
+    float local_sum = 0.0f;
     if (gid < n[0]) {
-        float product = x[gid] * y[gid];
-        atomic_fetch_add_explicit(partial_sum, product, memory_order_relaxed);
+        local_sum = x[gid] * y[gid];
+    }
+
+    // Store to threadgroup memory and perform reduction
+    shared_data[tid] = local_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    parallel_reduce_sum(shared_data, tid, tg_size);
+
+    // First thread in each threadgroup writes result
+    if (tid == 0) {
+        atomic_fetch_add_explicit((device atomic_float*)&partial_sum[0], shared_data[0], memory_order_relaxed);
     }
 }
 
@@ -61,42 +113,78 @@ kernel void pcg_iteration_kernel(
     device float* z [[buffer(6)]],
     device float* p [[buffer(7)]],
     device float* ap [[buffer(8)]],
-    device atomic_float* dot_rz [[buffer(9)]],
-    device atomic_float* dot_pap [[buffer(10)]],
-    device atomic_float* dot_rz_new [[buffer(11)]],
-    device atomic_float* residual_norm [[buffer(12)]],
+    device float* dot_rz [[buffer(9)]],
+    device float* dot_pap [[buffer(10)]],
+    device float* dot_rz_new [[buffer(11)]],
+    device float* residual_norm [[buffer(12)]],
     const device uint* n [[buffer(13)]],
     const device uint* stage [[buffer(14)]],
-    uint gid [[thread_position_in_grid]]
+    uint gid [[thread_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]],
+    threadgroup float* shared_data [[threadgroup(0)]]
 ) {
     uint idx = gid;
     uint n_val = n[0];
     uint stage_val = stage[0];
-    
-    if (idx >= n_val) {
-        return;
-    }
-    
+
     if (stage_val == 0) {
-        int row_start = row_offsets[idx];
-        int row_end = row_offsets[idx + 1];
-        float sum = 0.0;
-        for (int j = row_start; j < row_end; j++) {
-            sum += values[j] * p[col_indices[j]];
+        // SpMV: ap = A * p
+        if (idx < n_val) {
+            int row_start = row_offsets[idx];
+            int row_end = row_offsets[idx + 1];
+            float sum = 0.0;
+            for (int j = row_start; j < row_end; j++) {
+                sum += values[j] * p[col_indices[j]];
+            }
+            ap[idx] = sum;
         }
-        ap[idx] = sum;
     }
     else if (stage_val == 1) {
-        float product = p[idx] * ap[idx];
-        atomic_fetch_add_explicit(dot_pap, product, memory_order_relaxed);
+        // Dot product: p · ap with parallel reduction
+        float local_sum = 0.0f;
+        if (idx < n_val) {
+            local_sum = p[idx] * ap[idx];
+        }
+
+        shared_data[tid] = local_sum;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        parallel_reduce_sum(shared_data, tid, tg_size);
+
+        if (tid == 0) {
+            atomic_fetch_add_explicit((device atomic_float*)&dot_pap[0], shared_data[0], memory_order_relaxed);
+        }
     }
     else if (stage_val == 2) {
-        float product = r[idx] * z[idx];
-        atomic_fetch_add_explicit(dot_rz_new, product, memory_order_relaxed);
+        // Dot product: r · z with parallel reduction
+        float local_sum = 0.0f;
+        if (idx < n_val) {
+            local_sum = r[idx] * z[idx];
+        }
+
+        shared_data[tid] = local_sum;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        parallel_reduce_sum(shared_data, tid, tg_size);
+
+        if (tid == 0) {
+            atomic_fetch_add_explicit((device atomic_float*)&dot_rz_new[0], shared_data[0], memory_order_relaxed);
+        }
     }
     else if (stage_val == 3) {
-        float val = r[idx];
-        atomic_fetch_add_explicit(residual_norm, val * val, memory_order_relaxed);
+        // Norm: r · r with parallel reduction
+        float local_sum = 0.0f;
+        if (idx < n_val) {
+            float val = r[idx];
+            local_sum = val * val;
+        }
+
+        shared_data[tid] = local_sum;
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        parallel_reduce_sum(shared_data, tid, tg_size);
+
+        if (tid == 0) {
+            atomic_fetch_add_explicit((device atomic_float*)&residual_norm[0], shared_data[0], memory_order_relaxed);
+        }
     }
 }
 
@@ -209,13 +297,29 @@ kernel void vector_update_kernel(
 
 kernel void norm2_kernel(
     const device float* x [[buffer(0)]],
-    device atomic_float* partial_sum [[buffer(1)]],
+    device float* partial_sum [[buffer(1)]],
     const device uint* n [[buffer(2)]],
-    uint gid [[thread_position_in_grid]]
+    uint gid [[thread_position_in_grid]],
+    uint tid [[thread_position_in_threadgroup]],
+    uint tg_size [[threads_per_threadgroup]],
+    threadgroup float* shared_data [[threadgroup(0)]]
 ) {
+    // Load and compute squared value
+    float local_sum = 0.0f;
     if (gid < n[0]) {
         float val = x[gid];
-        atomic_fetch_add_explicit(partial_sum, val * val, memory_order_relaxed);
+        local_sum = val * val;
+    }
+
+    // Store to threadgroup memory and perform reduction
+    shared_data[tid] = local_sum;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    parallel_reduce_sum(shared_data, tid, tg_size);
+
+    // First thread in each threadgroup writes result
+    if (tid == 0) {
+        atomic_fetch_add_explicit((device atomic_float*)&partial_sum[0], shared_data[0], memory_order_relaxed);
     }
 }
 

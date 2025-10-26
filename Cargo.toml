@@ -68,3 +68,11 @@ path = "tests/contract/test_audit_trail.rs"
 [[test]]
 name = "test_report_export"
 path = "tests/integration/test_report_export.rs"
+
+[[test]]
+name = "cpu_vs_gpu_bench"
+path = "tests/benchmarks/cpu_vs_gpu_bench.rs"
+
+[[test]]
+name = "matrix_free_bench"
+path = "tests/benchmarks/matrix_free_bench.rs"
