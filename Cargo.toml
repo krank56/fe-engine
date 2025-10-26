@@ -2,7 +2,14 @@
 name = "fe-engine"
 version = "0.1.0"
 edition = "2021"
-authors = ["Structure AI Team"]
+authors = ["krank56 <https://github.com/krank56>"]
+license = "MIT"
+repository = "https://github.com/krank56/fe-engine"
+documentation = "https://docs.rs/fe-engine"
+homepage = "https://github.com/krank56/fe-engine"
+readme = "README.md"
+keywords = ["finite-element", "structural-engineering", "fea", "gpu", "engineering"]
+categories = ["science", "simulation"]
 description = "GPU-accelerated finite element analysis engine for structural engineering"
 
 [dependencies]
