@@ -229,24 +229,24 @@ impl MetalPCG {
         let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
         encoder.setComputePipelineState(&self.pipeline_precondition);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 2);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 2); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3); }
         encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
         encoder.setComputePipelineState(&self.pipeline_copy);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 2);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 2); }
         encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
         encoder.setComputePipelineState(&self.pipeline_dot_to_buffer);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 2);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
-        encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 2); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3); }
+        unsafe { encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0); }
         encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
         encoder.endEncoding();
@@ -264,109 +264,109 @@ impl MetalPCG {
             for _iter_in_batch in 0..batch_size.min(max_iterations - batch_start) {
                 // Zero reduction buffers
                 encoder.setComputePipelineState(&self.pipeline_zero_scalar);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 0);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 0); }
                 encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
                 encoder.setComputePipelineState(&self.pipeline_zero_scalar);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 0);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 0); }
                 encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
                 // SpMV: ap = A * p
                 encoder.setComputePipelineState(&self.pipeline_spmv);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_values), 0, 0);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_col_indices), 0, 1);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_row_offsets), 0, 2);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 3);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 4);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 5);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_values), 0, 0); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_col_indices), 0, 1); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_row_offsets), 0, 2); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 3); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 4); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 5); }
                 encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Dot product: p · ap (with parallel reduction)
                 encoder.setComputePipelineState(&self.pipeline_dot_to_buffer);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 0);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 1);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 2);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
-                encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 0); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 1); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 2); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3); }
+                unsafe { encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0); }
                 encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Compute alpha
                 encoder.setComputePipelineState(&self.pipeline_compute_alpha_beta);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 0);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 1);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 2);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 3);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 4);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_rz_old), 0, 5);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_stage0), 0, 6);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 0); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 1); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 2); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 3); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 4); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_rz_old), 0, 5); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_stage0), 0, 6); }
                 encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
                 // Update x and r
                 encoder.setComputePipelineState(&self.pipeline_pcg_update_vectors);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 0);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 1);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 2);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 3);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 4);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 5);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 6);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 7);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 8);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_stage0), 0, 9);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 0); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 1); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 2); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 3); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 4); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 5); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 6); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 7); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 8); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_stage0), 0, 9); }
                 encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Precondition: z = M^-1 * r
                 encoder.setComputePipelineState(&self.pipeline_pcg_update_vectors);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 0);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 1);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 2);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 3);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 4);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 5);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 6);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 7);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 8);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_stage1), 0, 9);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 0); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 1); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 2); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 3); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 4); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 5); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 6); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 7); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 8); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_stage1), 0, 9); }
                 encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Dot product: r · z (with parallel reduction)
                 encoder.setComputePipelineState(&self.pipeline_dot_to_buffer);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 0);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 1);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 2);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
-                encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 0); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 1); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 2); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3); }
+                unsafe { encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0); }
                 encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Compute beta
                 encoder.setComputePipelineState(&self.pipeline_compute_alpha_beta);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 0);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 1);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 2);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 3);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 4);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_rz_old), 0, 5);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_stage1), 0, 6);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 0); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 1); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 2); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 3); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 4); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_rz_old), 0, 5); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_stage1), 0, 6); }
                 encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
                 // Update p
                 encoder.setComputePipelineState(&self.pipeline_pcg_update_vectors);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 0);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 1);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 2);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 3);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 4);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 5);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 6);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 7);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 8);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_stage2), 0, 9);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 0); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 1); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 2); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 3); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 4); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 5); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 6); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 7); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 8); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_stage2), 0, 9); }
                 encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Copy rz_new to rz
                 encoder.setComputePipelineState(&self.pipeline_copy_scalar);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 0);
-                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 1);
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 0); }
+        unsafe {         encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 1); }
                 encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
             }
 
@@ -379,16 +379,16 @@ impl MetalPCG {
             let encoder2 = command_buffer2.computeCommandEncoder().expect("Failed to create compute encoder");
 
             encoder2.setComputePipelineState(&self.pipeline_zero_scalar);
-            encoder2.setBuffer_offset_atIndex(Some(&*buf_residual_norm), 0, 0);
+        unsafe {     encoder2.setBuffer_offset_atIndex(Some(&*buf_residual_norm), 0, 0); }
             let single_thread = MTLSize { width: 1, height: 1, depth: 1 };
             encoder2.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
             encoder2.setComputePipelineState(&self.pipeline_dot_to_buffer);
-            encoder2.setBuffer_offset_atIndex(Some(&*buf_r), 0, 0);
-            encoder2.setBuffer_offset_atIndex(Some(&*buf_r), 0, 1);
-            encoder2.setBuffer_offset_atIndex(Some(&*buf_residual_norm), 0, 2);
-            encoder2.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
-            encoder2.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+        unsafe {     encoder2.setBuffer_offset_atIndex(Some(&*buf_r), 0, 0); }
+        unsafe {     encoder2.setBuffer_offset_atIndex(Some(&*buf_r), 0, 1); }
+        unsafe {     encoder2.setBuffer_offset_atIndex(Some(&*buf_residual_norm), 0, 2); }
+        unsafe {     encoder2.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3); }
+            unsafe { encoder2.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0); }
             encoder2.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
             encoder2.endEncoding();
@@ -396,7 +396,7 @@ impl MetalPCG {
             command_buffer2.waitUntilCompleted();
 
             let residual_norm = unsafe {
-                let ptr = buf_residual_norm.contents() as *const f32;
+                let ptr = buf_residual_norm.contents().as_ptr() as *const f32;
                 (*ptr).sqrt()
             };
 
@@ -521,12 +521,12 @@ impl MetalPCG {
         let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
         encoder.setComputePipelineState(&self.pipeline_spmv);
-        encoder.setBuffer_offset_atIndex(Some(values), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(col_indices), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(row_offsets), 0, 2);
-        encoder.setBuffer_offset_atIndex(Some(x), 0, 3);
-        encoder.setBuffer_offset_atIndex(Some(y), 0, 4);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 5);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(values), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(col_indices), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(row_offsets), 0, 2); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(x), 0, 3); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(y), 0, 4); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 5); }
 
         let grid_size = MTLSize { width: n, height: 1, depth: 1 };
         let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };
@@ -549,10 +549,10 @@ impl MetalPCG {
         let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
         encoder.setComputePipelineState(&self.pipeline_dot);
-        encoder.setBuffer_offset_atIndex(Some(x), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(y), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_partial), 0, 2);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(x), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(y), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_partial), 0, 2); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3); }
 
         // Use fixed 256 threadgroup size (power of 2 for efficient reduction)
         let threadgroup_width = 256;
@@ -560,7 +560,7 @@ impl MetalPCG {
         let threadgroup_size = MTLSize { width: threadgroup_width, height: 1, depth: 1 };
         let threadgroup_mem_size = threadgroup_width * std::mem::size_of::<f32>();
 
-        encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+        unsafe { encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0); }
         encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
         encoder.endEncoding();
 
@@ -590,10 +590,10 @@ impl MetalPCG {
         let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
         encoder.setComputePipelineState(&self.pipeline_axpy);
-        encoder.setBuffer_offset_atIndex(Some(y), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(x), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(alpha), 0, 2);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(y), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(x), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(alpha), 0, 2); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3); }
 
         let grid_size = MTLSize { width: n, height: 1, depth: 1 };
         let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };
@@ -620,10 +620,10 @@ impl MetalPCG {
         let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
         encoder.setComputePipelineState(&self.pipeline_precondition);
-        encoder.setBuffer_offset_atIndex(Some(diag), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(r), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(z), 0, 2);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(diag), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(r), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(z), 0, 2); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3); }
 
         let grid_size = MTLSize { width: n, height: 1, depth: 1 };
         let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };
@@ -650,10 +650,10 @@ impl MetalPCG {
         let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
         encoder.setComputePipelineState(&self.pipeline_vector_update);
-        encoder.setBuffer_offset_atIndex(Some(p), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(z), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(beta), 0, 2);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(p), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(z), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(beta), 0, 2); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3); }
 
         let grid_size = MTLSize { width: n, height: 1, depth: 1 };
         let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };
@@ -676,9 +676,9 @@ impl MetalPCG {
         let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
         encoder.setComputePipelineState(&self.pipeline_norm2);
-        encoder.setBuffer_offset_atIndex(Some(x), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_partial), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 2);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(x), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_partial), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 2); }
 
         // Use fixed 256 threadgroup size (power of 2 for efficient reduction)
         let threadgroup_width = 256;
@@ -686,7 +686,7 @@ impl MetalPCG {
         let threadgroup_size = MTLSize { width: threadgroup_width, height: 1, depth: 1 };
         let threadgroup_mem_size = threadgroup_width * std::mem::size_of::<f32>();
 
-        encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+        unsafe { encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0); }
         encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
         encoder.endEncoding();
 
@@ -710,9 +710,9 @@ impl MetalPCG {
         let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
         encoder.setComputePipelineState(&self.pipeline_copy);
-        encoder.setBuffer_offset_atIndex(Some(src), 0, 0);
-        encoder.setBuffer_offset_atIndex(Some(dst), 0, 1);
-        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 2);
+        unsafe { encoder.setBuffer_offset_atIndex(Some(src), 0, 0); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(dst), 0, 1); }
+        unsafe { encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 2); }
 
         let grid_size = MTLSize { width: n, height: 1, depth: 1 };
         let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };

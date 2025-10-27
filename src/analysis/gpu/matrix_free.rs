@@ -335,10 +335,10 @@ impl MatrixFreeGPU {
         {
             let clear_encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
             clear_encoder.setComputePipelineState(&self.clear_buffer_pipeline);
-            clear_encoder.setBuffer_offset_atIndex(Some(&*buf_y), 0, 0);
+        unsafe {     clear_encoder.setBuffer_offset_atIndex(Some(&*buf_y), 0, 0); }
 
             let grid_size = MTLSize { width: self.num_dofs, height: 1, depth: 1 };
-            let threadgroup_size = MTLSize { width: 256.min(self.num_dofs as u64), height: 1, depth: 1 };
+            let threadgroup_size = MTLSize { width: 256.min(self.num_dofs), height: 1, depth: 1 };
             clear_encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
             clear_encoder.endEncoding();
         }
@@ -347,13 +347,13 @@ impl MatrixFreeGPU {
         {
             let matvec_encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
             matvec_encoder.setComputePipelineState(&self.element_matvec_pipeline);
-            matvec_encoder.setBuffer_offset_atIndex(Some(&*self.element_buffer), 0, 0); // Elements (resident!)
-            matvec_encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 1);               // Input vector
-            matvec_encoder.setBuffer_offset_atIndex(Some(&*buf_y), 0, 2);               // Output vector
+            unsafe { matvec_encoder.setBuffer_offset_atIndex(Some(&*self.element_buffer), 0, 0); } // Elements (resident!)
+            unsafe { matvec_encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 1); }               // Input vector
+            unsafe { matvec_encoder.setBuffer_offset_atIndex(Some(&*buf_y), 0, 2); }               // Output vector
 
             // Launch one thread per element
             let grid_size = MTLSize { width: self.num_elements, height: 1, depth: 1 };
-            let threadgroup_size = MTLSize { width: 256.min(self.num_elements as u64), height: 1, depth: 1 };
+            let threadgroup_size = MTLSize { width: 256.min(self.num_elements), height: 1, depth: 1 };
 
             matvec_encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
             matvec_encoder.endEncoding();
