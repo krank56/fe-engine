@@ -5,7 +5,17 @@ use crate::analysis::solver::LinearSolver;
 use crate::analysis::SolverError;
 
 #[cfg(feature = "gpu")]
-use metal::{Buffer, CommandQueue, ComputePipelineState, Device, Library, MTLResourceOptions};
+use objc2_metal::{
+    MTLBuffer, MTLCommandBuffer as _, MTLCommandEncoder as _, MTLCommandQueue,
+    MTLComputeCommandEncoder as _, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
+    MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
+};
+#[cfg(feature = "gpu")]
+use objc2::rc::Retained;
+#[cfg(feature = "gpu")]
+use objc2::runtime::ProtocolObject;
+#[cfg(feature = "gpu")]
+use objc2_foundation::{ns_string, NSString};
 
 /// GPU-accelerated PCG solver using Metal
 ///
@@ -20,21 +30,21 @@ use metal::{Buffer, CommandQueue, ComputePipelineState, Device, Library, MTLReso
 /// GPU solver infrastructure is in place for future optimization.
 #[cfg(feature = "gpu")]
 pub struct MetalPCG {
-    device: Device,
-    command_queue: CommandQueue,
-    pipeline_spmv: ComputePipelineState,
-    pipeline_dot: ComputePipelineState,
-    pipeline_axpy: ComputePipelineState,
-    pipeline_precondition: ComputePipelineState,
-    pipeline_vector_update: ComputePipelineState,
-    pipeline_norm2: ComputePipelineState,
-    pipeline_copy: ComputePipelineState,
-    pipeline_copy_scalar: ComputePipelineState,
-    pipeline_zero_scalar: ComputePipelineState,
-    pipeline_pcg_iteration: ComputePipelineState,
-    pipeline_pcg_update_vectors: ComputePipelineState,
-    pipeline_dot_to_buffer: ComputePipelineState,
-    pipeline_compute_alpha_beta: ComputePipelineState,
+    device: Retained<ProtocolObject<dyn MTLDevice>>,
+    command_queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
+    pipeline_spmv: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_dot: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_axpy: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_precondition: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_vector_update: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_norm2: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_copy: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_copy_scalar: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_zero_scalar: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_pcg_iteration: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_pcg_update_vectors: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_dot_to_buffer: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    pipeline_compute_alpha_beta: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
 }
 
 #[cfg(not(feature = "gpu"))]
@@ -44,10 +54,12 @@ impl MetalPCG {
     pub fn new() -> Result<Self, String> {
         #[cfg(feature = "gpu")]
         {
-            let device = Device::system_default()
+            let device = MTLCreateSystemDefaultDevice()
                 .ok_or_else(|| "No Metal-compatible GPU found".to_string())?;
 
-            let command_queue = device.new_command_queue();
+            let command_queue = device
+                .newCommandQueue()
+                .ok_or_else(|| "Failed to create command queue".to_string())?;
 
             let library = Self::compile_shaders(&device)?;
 
@@ -99,38 +111,40 @@ impl MetalPCG {
     }
 
     #[cfg(feature = "gpu")]
-    fn compile_shaders(device: &Device) -> Result<Library, String> {
-        let shader_source = include_str!("shaders/pcg.metal");
+    fn compile_shaders(device: &ProtocolObject<dyn MTLDevice>) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>, String> {
+        let shader_source = ns_string!(include_str!("shaders/pcg.metal"));
 
         device
-            .new_library_with_source(shader_source, &metal::CompileOptions::new())
+            .newLibraryWithSource_options_error(shader_source, None)
             .map_err(|e| format!("Failed to compile Metal shaders: {}", e))
     }
 
     #[cfg(feature = "gpu")]
     fn create_pipeline(
-        device: &Device,
-        library: &Library,
+        device: &ProtocolObject<dyn MTLDevice>,
+        library: &ProtocolObject<dyn MTLLibrary>,
         function_name: &str,
-    ) -> Result<ComputePipelineState, String> {
+    ) -> Result<Retained<ProtocolObject<dyn MTLComputePipelineState>>, String> {
+        let name = NSString::from_str(function_name);
         let function = library
-            .get_function(function_name, None)
-            .map_err(|e| format!("Failed to get function '{}': {}", function_name, e))?;
+            .newFunctionWithName(&name)
+            .ok_or_else(|| format!("Failed to get function '{}'", function_name))?;
 
         device
-            .new_compute_pipeline_state_with_function(&function)
+            .newComputePipelineStateWithFunction_error(&function)
             .map_err(|e| format!("Failed to create pipeline for '{}': {}", function_name, e))
     }
 
     #[cfg(feature = "gpu")]
-    fn create_buffer<T>(&self, data: &[T]) -> Buffer {
-        let size = (data.len() * std::mem::size_of::<T>()) as u64;
+    fn create_buffer<T>(&self, data: &[T]) -> Retained<ProtocolObject<dyn MTLBuffer>> {
+        let size = data.len() * std::mem::size_of::<T>();
         let buffer = self
             .device
-            .new_buffer(size, MTLResourceOptions::StorageModeShared);
+            .newBufferWithLength_options(size, MTLResourceOptions::StorageModeShared)
+            .expect("Failed to create buffer");
 
         unsafe {
-            let ptr = buffer.contents() as *mut T;
+            let ptr = buffer.contents().as_ptr() as *mut T;
             std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
         }
 
@@ -138,13 +152,13 @@ impl MetalPCG {
     }
 
     #[cfg(feature = "gpu")]
-    fn create_buffer_f32_from_f64(&self, data: &[f64]) -> Buffer {
+    fn create_buffer_f32_from_f64(&self, data: &[f64]) -> Retained<ProtocolObject<dyn MTLBuffer>> {
         let float_data: Vec<f32> = data.iter().map(|&x| x as f32).collect();
         self.create_buffer(&float_data)
     }
 
     #[cfg(feature = "gpu")]
-    fn create_zero_buffer(&self, size: usize) -> Buffer {
+    fn create_zero_buffer(&self, size: usize) -> Retained<ProtocolObject<dyn MTLBuffer>> {
         let data = vec![0.0f32; size];
         self.create_buffer(&data)
     }
@@ -205,181 +219,181 @@ impl MetalPCG {
         let tolerance = 1e-5f32;
 
         // Use fixed 256 threadgroup size (power of 2 for efficient reduction)
-        let threadgroup_width = 256u64;
-        let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(threadgroup_width, 1, 1);
-        let threadgroup_mem_size = (threadgroup_width * std::mem::size_of::<f32>() as u64) as u64;
+        let threadgroup_width = 256;
+        let grid_size = MTLSize { width: n, height: 1, depth: 1 };
+        let threadgroup_size = MTLSize { width: threadgroup_width, height: 1, depth: 1 };
+        let threadgroup_mem_size = threadgroup_width * std::mem::size_of::<f32>();
 
         // Initialization phase
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_compute_command_encoder();
+        let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+        let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
-        encoder.set_compute_pipeline_state(&self.pipeline_precondition);
-        encoder.set_buffer(0, Some(&buf_diag), 0);
-        encoder.set_buffer(1, Some(&buf_r), 0);
-        encoder.set_buffer(2, Some(&buf_z), 0);
-        encoder.set_buffer(3, Some(&buf_n), 0);
-        encoder.dispatch_threads(grid_size, threadgroup_size);
+        encoder.setComputePipelineState(&self.pipeline_precondition);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 2);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
-        encoder.set_compute_pipeline_state(&self.pipeline_copy);
-        encoder.set_buffer(0, Some(&buf_z), 0);
-        encoder.set_buffer(1, Some(&buf_p), 0);
-        encoder.set_buffer(2, Some(&buf_n), 0);
-        encoder.dispatch_threads(grid_size, threadgroup_size);
+        encoder.setComputePipelineState(&self.pipeline_copy);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 2);
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
-        encoder.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
-        encoder.set_buffer(0, Some(&buf_r), 0);
-        encoder.set_buffer(1, Some(&buf_z), 0);
-        encoder.set_buffer(2, Some(&buf_dot_rz), 0);
-        encoder.set_buffer(3, Some(&buf_n), 0);
-        encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
-        encoder.dispatch_threads(grid_size, threadgroup_size);
+        encoder.setComputePipelineState(&self.pipeline_dot_to_buffer);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 2);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+        encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
-        encoder.end_encoding();
+        encoder.endEncoding();
         command_buffer.commit();
-        command_buffer.wait_until_completed();
+        command_buffer.waitUntilCompleted();
 
         // Main PCG iteration loop - batch iterations to reduce synchronization
         let batch_size = 10;
         for batch_start in (0..max_iterations).step_by(batch_size) {
-            let command_buffer = self.command_queue.new_command_buffer();
-            let encoder = command_buffer.new_compute_command_encoder();
+            let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+            let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
-            let single_thread = metal::MTLSize::new(1, 1, 1);
+            let single_thread = MTLSize { width: 1, height: 1, depth: 1 };
 
             for _iter_in_batch in 0..batch_size.min(max_iterations - batch_start) {
                 // Zero reduction buffers
-                encoder.set_compute_pipeline_state(&self.pipeline_zero_scalar);
-                encoder.set_buffer(0, Some(&buf_dot_pap), 0);
-                encoder.dispatch_threads(single_thread, single_thread);
+                encoder.setComputePipelineState(&self.pipeline_zero_scalar);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 0);
+                encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
-                encoder.set_compute_pipeline_state(&self.pipeline_zero_scalar);
-                encoder.set_buffer(0, Some(&buf_dot_rz_new), 0);
-                encoder.dispatch_threads(single_thread, single_thread);
+                encoder.setComputePipelineState(&self.pipeline_zero_scalar);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 0);
+                encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
                 // SpMV: ap = A * p
-                encoder.set_compute_pipeline_state(&self.pipeline_spmv);
-                encoder.set_buffer(0, Some(&buf_values), 0);
-                encoder.set_buffer(1, Some(&buf_col_indices), 0);
-                encoder.set_buffer(2, Some(&buf_row_offsets), 0);
-                encoder.set_buffer(3, Some(&buf_p), 0);
-                encoder.set_buffer(4, Some(&buf_ap), 0);
-                encoder.set_buffer(5, Some(&buf_n), 0);
-                encoder.dispatch_threads(grid_size, threadgroup_size);
+                encoder.setComputePipelineState(&self.pipeline_spmv);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_values), 0, 0);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_col_indices), 0, 1);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_row_offsets), 0, 2);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 3);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 4);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 5);
+                encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Dot product: p · ap (with parallel reduction)
-                encoder.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
-                encoder.set_buffer(0, Some(&buf_p), 0);
-                encoder.set_buffer(1, Some(&buf_ap), 0);
-                encoder.set_buffer(2, Some(&buf_dot_pap), 0);
-                encoder.set_buffer(3, Some(&buf_n), 0);
-                encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
-                encoder.dispatch_threads(grid_size, threadgroup_size);
+                encoder.setComputePipelineState(&self.pipeline_dot_to_buffer);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 0);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 1);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 2);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+                encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+                encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Compute alpha
-                encoder.set_compute_pipeline_state(&self.pipeline_compute_alpha_beta);
-                encoder.set_buffer(0, Some(&buf_dot_rz), 0);
-                encoder.set_buffer(1, Some(&buf_dot_pap), 0);
-                encoder.set_buffer(2, Some(&buf_dot_rz_new), 0);
-                encoder.set_buffer(3, Some(&buf_alpha), 0);
-                encoder.set_buffer(4, Some(&buf_beta), 0);
-                encoder.set_buffer(5, Some(&buf_rz_old), 0);
-                encoder.set_buffer(6, Some(&buf_stage0), 0);
-                encoder.dispatch_threads(single_thread, single_thread);
+                encoder.setComputePipelineState(&self.pipeline_compute_alpha_beta);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 0);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 1);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 2);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 3);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 4);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_rz_old), 0, 5);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_stage0), 0, 6);
+                encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
                 // Update x and r
-                encoder.set_compute_pipeline_state(&self.pipeline_pcg_update_vectors);
-                encoder.set_buffer(0, Some(&buf_alpha), 0);
-                encoder.set_buffer(1, Some(&buf_beta), 0);
-                encoder.set_buffer(2, Some(&buf_diag), 0);
-                encoder.set_buffer(3, Some(&buf_x), 0);
-                encoder.set_buffer(4, Some(&buf_r), 0);
-                encoder.set_buffer(5, Some(&buf_z), 0);
-                encoder.set_buffer(6, Some(&buf_p), 0);
-                encoder.set_buffer(7, Some(&buf_ap), 0);
-                encoder.set_buffer(8, Some(&buf_n), 0);
-                encoder.set_buffer(9, Some(&buf_stage0), 0);
-                encoder.dispatch_threads(grid_size, threadgroup_size);
+                encoder.setComputePipelineState(&self.pipeline_pcg_update_vectors);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 0);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 1);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 2);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 3);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 4);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 5);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 6);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 7);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 8);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_stage0), 0, 9);
+                encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Precondition: z = M^-1 * r
-                encoder.set_compute_pipeline_state(&self.pipeline_pcg_update_vectors);
-                encoder.set_buffer(0, Some(&buf_alpha), 0);
-                encoder.set_buffer(1, Some(&buf_beta), 0);
-                encoder.set_buffer(2, Some(&buf_diag), 0);
-                encoder.set_buffer(3, Some(&buf_x), 0);
-                encoder.set_buffer(4, Some(&buf_r), 0);
-                encoder.set_buffer(5, Some(&buf_z), 0);
-                encoder.set_buffer(6, Some(&buf_p), 0);
-                encoder.set_buffer(7, Some(&buf_ap), 0);
-                encoder.set_buffer(8, Some(&buf_n), 0);
-                encoder.set_buffer(9, Some(&buf_stage1), 0);
-                encoder.dispatch_threads(grid_size, threadgroup_size);
+                encoder.setComputePipelineState(&self.pipeline_pcg_update_vectors);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 0);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 1);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 2);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 3);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 4);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 5);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 6);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 7);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 8);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_stage1), 0, 9);
+                encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Dot product: r · z (with parallel reduction)
-                encoder.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
-                encoder.set_buffer(0, Some(&buf_r), 0);
-                encoder.set_buffer(1, Some(&buf_z), 0);
-                encoder.set_buffer(2, Some(&buf_dot_rz_new), 0);
-                encoder.set_buffer(3, Some(&buf_n), 0);
-                encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
-                encoder.dispatch_threads(grid_size, threadgroup_size);
+                encoder.setComputePipelineState(&self.pipeline_dot_to_buffer);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 0);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 1);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 2);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+                encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+                encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Compute beta
-                encoder.set_compute_pipeline_state(&self.pipeline_compute_alpha_beta);
-                encoder.set_buffer(0, Some(&buf_dot_rz), 0);
-                encoder.set_buffer(1, Some(&buf_dot_pap), 0);
-                encoder.set_buffer(2, Some(&buf_dot_rz_new), 0);
-                encoder.set_buffer(3, Some(&buf_alpha), 0);
-                encoder.set_buffer(4, Some(&buf_beta), 0);
-                encoder.set_buffer(5, Some(&buf_rz_old), 0);
-                encoder.set_buffer(6, Some(&buf_stage1), 0);
-                encoder.dispatch_threads(single_thread, single_thread);
+                encoder.setComputePipelineState(&self.pipeline_compute_alpha_beta);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 0);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_pap), 0, 1);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 2);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 3);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 4);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_rz_old), 0, 5);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_stage1), 0, 6);
+                encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
                 // Update p
-                encoder.set_compute_pipeline_state(&self.pipeline_pcg_update_vectors);
-                encoder.set_buffer(0, Some(&buf_alpha), 0);
-                encoder.set_buffer(1, Some(&buf_beta), 0);
-                encoder.set_buffer(2, Some(&buf_diag), 0);
-                encoder.set_buffer(3, Some(&buf_x), 0);
-                encoder.set_buffer(4, Some(&buf_r), 0);
-                encoder.set_buffer(5, Some(&buf_z), 0);
-                encoder.set_buffer(6, Some(&buf_p), 0);
-                encoder.set_buffer(7, Some(&buf_ap), 0);
-                encoder.set_buffer(8, Some(&buf_n), 0);
-                encoder.set_buffer(9, Some(&buf_stage2), 0);
-                encoder.dispatch_threads(grid_size, threadgroup_size);
+                encoder.setComputePipelineState(&self.pipeline_pcg_update_vectors);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_alpha), 0, 0);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_beta), 0, 1);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_diag), 0, 2);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 3);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_r), 0, 4);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_z), 0, 5);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_p), 0, 6);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_ap), 0, 7);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 8);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_stage2), 0, 9);
+                encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
                 // Copy rz_new to rz
-                encoder.set_compute_pipeline_state(&self.pipeline_copy_scalar);
-                encoder.set_buffer(0, Some(&buf_dot_rz_new), 0);
-                encoder.set_buffer(1, Some(&buf_dot_rz), 0);
-                encoder.dispatch_threads(single_thread, single_thread);
+                encoder.setComputePipelineState(&self.pipeline_copy_scalar);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz_new), 0, 0);
+                encoder.setBuffer_offset_atIndex(Some(&*buf_dot_rz), 0, 1);
+                encoder.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
             }
 
-            encoder.end_encoding();
+            encoder.endEncoding();
             command_buffer.commit();
-            command_buffer.wait_until_completed();
+            command_buffer.waitUntilCompleted();
 
             // Check convergence less frequently (every batch instead of every 100 iters)
-            let command_buffer2 = self.command_queue.new_command_buffer();
-            let encoder2 = command_buffer2.new_compute_command_encoder();
+            let command_buffer2 = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+            let encoder2 = command_buffer2.computeCommandEncoder().expect("Failed to create compute encoder");
 
-            encoder2.set_compute_pipeline_state(&self.pipeline_zero_scalar);
-            encoder2.set_buffer(0, Some(&buf_residual_norm), 0);
-            let single_thread = metal::MTLSize::new(1, 1, 1);
-            encoder2.dispatch_threads(single_thread, single_thread);
+            encoder2.setComputePipelineState(&self.pipeline_zero_scalar);
+            encoder2.setBuffer_offset_atIndex(Some(&*buf_residual_norm), 0, 0);
+            let single_thread = MTLSize { width: 1, height: 1, depth: 1 };
+            encoder2.dispatchThreads_threadsPerThreadgroup(single_thread, single_thread);
 
-            encoder2.set_compute_pipeline_state(&self.pipeline_dot_to_buffer);
-            encoder2.set_buffer(0, Some(&buf_r), 0);
-            encoder2.set_buffer(1, Some(&buf_r), 0);
-            encoder2.set_buffer(2, Some(&buf_residual_norm), 0);
-            encoder2.set_buffer(3, Some(&buf_n), 0);
-            encoder2.set_threadgroup_memory_length(0, threadgroup_mem_size);
-            encoder2.dispatch_threads(grid_size, threadgroup_size);
+            encoder2.setComputePipelineState(&self.pipeline_dot_to_buffer);
+            encoder2.setBuffer_offset_atIndex(Some(&*buf_r), 0, 0);
+            encoder2.setBuffer_offset_atIndex(Some(&*buf_r), 0, 1);
+            encoder2.setBuffer_offset_atIndex(Some(&*buf_residual_norm), 0, 2);
+            encoder2.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
+            encoder2.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+            encoder2.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
 
-            encoder2.end_encoding();
+            encoder2.endEncoding();
             command_buffer2.commit();
-            command_buffer2.wait_until_completed();
+            command_buffer2.waitUntilCompleted();
 
             let residual_norm = unsafe {
                 let ptr = buf_residual_norm.contents() as *const f32;
@@ -494,31 +508,31 @@ impl MetalPCG {
     #[cfg(feature = "gpu")]
     fn spmv_gpu(
         &self,
-        values: &Buffer,
-        col_indices: &Buffer,
-        row_offsets: &Buffer,
-        x: &Buffer,
-        y: &Buffer,
+        values: &ProtocolObject<dyn MTLBuffer>,
+        col_indices: &ProtocolObject<dyn MTLBuffer>,
+        row_offsets: &ProtocolObject<dyn MTLBuffer>,
+        x: &ProtocolObject<dyn MTLBuffer>,
+        y: &ProtocolObject<dyn MTLBuffer>,
         n: usize,
     ) -> Result<(), SolverError> {
         let buf_n = self.create_buffer(&[n as u32]);
 
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_compute_command_encoder();
+        let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+        let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
-        encoder.set_compute_pipeline_state(&self.pipeline_spmv);
-        encoder.set_buffer(0, Some(values), 0);
-        encoder.set_buffer(1, Some(col_indices), 0);
-        encoder.set_buffer(2, Some(row_offsets), 0);
-        encoder.set_buffer(3, Some(x), 0);
-        encoder.set_buffer(4, Some(y), 0);
-        encoder.set_buffer(5, Some(&buf_n), 0);
+        encoder.setComputePipelineState(&self.pipeline_spmv);
+        encoder.setBuffer_offset_atIndex(Some(values), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(col_indices), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(row_offsets), 0, 2);
+        encoder.setBuffer_offset_atIndex(Some(x), 0, 3);
+        encoder.setBuffer_offset_atIndex(Some(y), 0, 4);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 5);
 
-        let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(256, 1, 1);
+        let grid_size = MTLSize { width: n, height: 1, depth: 1 };
+        let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };
 
-        encoder.dispatch_threads(grid_size, threadgroup_size);
-        encoder.end_encoding();
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
+        encoder.endEncoding();
 
         command_buffer.commit();
 
@@ -526,36 +540,36 @@ impl MetalPCG {
     }
 
     #[cfg(feature = "gpu")]
-    fn dot_product_gpu(&self, x: &Buffer, y: &Buffer, n: usize) -> Result<f64, SolverError> {
+    fn dot_product_gpu(&self, x: &ProtocolObject<dyn MTLBuffer>, y: &ProtocolObject<dyn MTLBuffer>, n: usize) -> Result<f64, SolverError> {
         let partial_sum = vec![0.0f32; 1];
         let buf_partial = self.create_buffer(&partial_sum);
         let buf_n = self.create_buffer(&[n as u32]);
 
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_compute_command_encoder();
+        let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+        let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
-        encoder.set_compute_pipeline_state(&self.pipeline_dot);
-        encoder.set_buffer(0, Some(x), 0);
-        encoder.set_buffer(1, Some(y), 0);
-        encoder.set_buffer(2, Some(&buf_partial), 0);
-        encoder.set_buffer(3, Some(&buf_n), 0);
+        encoder.setComputePipelineState(&self.pipeline_dot);
+        encoder.setBuffer_offset_atIndex(Some(x), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(y), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_partial), 0, 2);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
 
         // Use fixed 256 threadgroup size (power of 2 for efficient reduction)
-        let threadgroup_width = 256u64;
-        let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(threadgroup_width, 1, 1);
-        let threadgroup_mem_size = (threadgroup_width * std::mem::size_of::<f32>() as u64) as u64;
+        let threadgroup_width = 256;
+        let grid_size = MTLSize { width: n, height: 1, depth: 1 };
+        let threadgroup_size = MTLSize { width: threadgroup_width, height: 1, depth: 1 };
+        let threadgroup_mem_size = threadgroup_width * std::mem::size_of::<f32>();
 
-        encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
-        encoder.dispatch_threads(grid_size, threadgroup_size);
-        encoder.end_encoding();
+        encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
+        encoder.endEncoding();
 
         command_buffer.commit();
-        command_buffer.wait_until_completed();
+        command_buffer.waitUntilCompleted();
 
         let mut result = vec![0.0f32; 1];
         unsafe {
-            let ptr = buf_partial.contents() as *const f32;
+            let ptr = buf_partial.contents().as_ptr() as *const f32;
             std::ptr::copy_nonoverlapping(ptr, result.as_mut_ptr(), 1);
         }
 
@@ -565,27 +579,27 @@ impl MetalPCG {
     #[cfg(feature = "gpu")]
     fn axpy_gpu(
         &self,
-        y: &Buffer,
-        x: &Buffer,
-        alpha: &Buffer,
+        y: &ProtocolObject<dyn MTLBuffer>,
+        x: &ProtocolObject<dyn MTLBuffer>,
+        alpha: &ProtocolObject<dyn MTLBuffer>,
         n: usize,
     ) -> Result<(), SolverError> {
         let buf_n = self.create_buffer(&[n as u32]);
 
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_compute_command_encoder();
+        let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+        let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
-        encoder.set_compute_pipeline_state(&self.pipeline_axpy);
-        encoder.set_buffer(0, Some(y), 0);
-        encoder.set_buffer(1, Some(x), 0);
-        encoder.set_buffer(2, Some(alpha), 0);
-        encoder.set_buffer(3, Some(&buf_n), 0);
+        encoder.setComputePipelineState(&self.pipeline_axpy);
+        encoder.setBuffer_offset_atIndex(Some(y), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(x), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(alpha), 0, 2);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
 
-        let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(256, 1, 1);
+        let grid_size = MTLSize { width: n, height: 1, depth: 1 };
+        let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };
 
-        encoder.dispatch_threads(grid_size, threadgroup_size);
-        encoder.end_encoding();
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
+        encoder.endEncoding();
 
         command_buffer.commit();
 
@@ -595,27 +609,27 @@ impl MetalPCG {
     #[cfg(feature = "gpu")]
     fn precondition_gpu(
         &self,
-        diag: &Buffer,
-        r: &Buffer,
-        z: &Buffer,
+        diag: &ProtocolObject<dyn MTLBuffer>,
+        r: &ProtocolObject<dyn MTLBuffer>,
+        z: &ProtocolObject<dyn MTLBuffer>,
         n: usize,
     ) -> Result<(), SolverError> {
         let buf_n = self.create_buffer(&[n as u32]);
 
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_compute_command_encoder();
+        let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+        let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
-        encoder.set_compute_pipeline_state(&self.pipeline_precondition);
-        encoder.set_buffer(0, Some(diag), 0);
-        encoder.set_buffer(1, Some(r), 0);
-        encoder.set_buffer(2, Some(z), 0);
-        encoder.set_buffer(3, Some(&buf_n), 0);
+        encoder.setComputePipelineState(&self.pipeline_precondition);
+        encoder.setBuffer_offset_atIndex(Some(diag), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(r), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(z), 0, 2);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
 
-        let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(256, 1, 1);
+        let grid_size = MTLSize { width: n, height: 1, depth: 1 };
+        let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };
 
-        encoder.dispatch_threads(grid_size, threadgroup_size);
-        encoder.end_encoding();
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
+        encoder.endEncoding();
 
         command_buffer.commit();
 
@@ -625,27 +639,27 @@ impl MetalPCG {
     #[cfg(feature = "gpu")]
     fn vector_update_gpu(
         &self,
-        p: &Buffer,
-        z: &Buffer,
-        beta: &Buffer,
+        p: &ProtocolObject<dyn MTLBuffer>,
+        z: &ProtocolObject<dyn MTLBuffer>,
+        beta: &ProtocolObject<dyn MTLBuffer>,
         n: usize,
     ) -> Result<(), SolverError> {
         let buf_n = self.create_buffer(&[n as u32]);
 
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_compute_command_encoder();
+        let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+        let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
-        encoder.set_compute_pipeline_state(&self.pipeline_vector_update);
-        encoder.set_buffer(0, Some(p), 0);
-        encoder.set_buffer(1, Some(z), 0);
-        encoder.set_buffer(2, Some(beta), 0);
-        encoder.set_buffer(3, Some(&buf_n), 0);
+        encoder.setComputePipelineState(&self.pipeline_vector_update);
+        encoder.setBuffer_offset_atIndex(Some(p), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(z), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(beta), 0, 2);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 3);
 
-        let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(256, 1, 1);
+        let grid_size = MTLSize { width: n, height: 1, depth: 1 };
+        let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };
 
-        encoder.dispatch_threads(grid_size, threadgroup_size);
-        encoder.end_encoding();
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
+        encoder.endEncoding();
 
         command_buffer.commit();
 
@@ -653,35 +667,35 @@ impl MetalPCG {
     }
 
     #[cfg(feature = "gpu")]
-    fn norm2_gpu(&self, x: &Buffer, n: usize) -> Result<f64, SolverError> {
+    fn norm2_gpu(&self, x: &ProtocolObject<dyn MTLBuffer>, n: usize) -> Result<f64, SolverError> {
         let partial_sum = vec![0.0f32; 1];
         let buf_partial = self.create_buffer(&partial_sum);
         let buf_n = self.create_buffer(&[n as u32]);
 
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_compute_command_encoder();
+        let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+        let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
-        encoder.set_compute_pipeline_state(&self.pipeline_norm2);
-        encoder.set_buffer(0, Some(x), 0);
-        encoder.set_buffer(1, Some(&buf_partial), 0);
-        encoder.set_buffer(2, Some(&buf_n), 0);
+        encoder.setComputePipelineState(&self.pipeline_norm2);
+        encoder.setBuffer_offset_atIndex(Some(x), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_partial), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 2);
 
         // Use fixed 256 threadgroup size (power of 2 for efficient reduction)
-        let threadgroup_width = 256u64;
-        let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(threadgroup_width, 1, 1);
-        let threadgroup_mem_size = (threadgroup_width * std::mem::size_of::<f32>() as u64) as u64;
+        let threadgroup_width = 256;
+        let grid_size = MTLSize { width: n, height: 1, depth: 1 };
+        let threadgroup_size = MTLSize { width: threadgroup_width, height: 1, depth: 1 };
+        let threadgroup_mem_size = threadgroup_width * std::mem::size_of::<f32>();
 
-        encoder.set_threadgroup_memory_length(0, threadgroup_mem_size);
-        encoder.dispatch_threads(grid_size, threadgroup_size);
-        encoder.end_encoding();
+        encoder.setThreadgroupMemoryLength_atIndex(threadgroup_mem_size, 0);
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
+        encoder.endEncoding();
 
         command_buffer.commit();
-        command_buffer.wait_until_completed();
+        command_buffer.waitUntilCompleted();
 
         let mut result = vec![0.0f32; 1];
         unsafe {
-            let ptr = buf_partial.contents() as *const f32;
+            let ptr = buf_partial.contents().as_ptr() as *const f32;
             std::ptr::copy_nonoverlapping(ptr, result.as_mut_ptr(), 1);
         }
 
@@ -689,22 +703,22 @@ impl MetalPCG {
     }
 
     #[cfg(feature = "gpu")]
-    fn copy_gpu(&self, src: &Buffer, dst: &Buffer, n: usize) -> Result<(), SolverError> {
+    fn copy_gpu(&self, src: &ProtocolObject<dyn MTLBuffer>, dst: &ProtocolObject<dyn MTLBuffer>, n: usize) -> Result<(), SolverError> {
         let buf_n = self.create_buffer(&[n as u32]);
 
-        let command_buffer = self.command_queue.new_command_buffer();
-        let encoder = command_buffer.new_compute_command_encoder();
+        let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
+        let encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
 
-        encoder.set_compute_pipeline_state(&self.pipeline_copy);
-        encoder.set_buffer(0, Some(src), 0);
-        encoder.set_buffer(1, Some(dst), 0);
-        encoder.set_buffer(2, Some(&buf_n), 0);
+        encoder.setComputePipelineState(&self.pipeline_copy);
+        encoder.setBuffer_offset_atIndex(Some(src), 0, 0);
+        encoder.setBuffer_offset_atIndex(Some(dst), 0, 1);
+        encoder.setBuffer_offset_atIndex(Some(&*buf_n), 0, 2);
 
-        let grid_size = metal::MTLSize::new(n as u64, 1, 1);
-        let threadgroup_size = metal::MTLSize::new(256, 1, 1);
+        let grid_size = MTLSize { width: n, height: 1, depth: 1 };
+        let threadgroup_size = MTLSize { width: 256, height: 1, depth: 1 };
 
-        encoder.dispatch_threads(grid_size, threadgroup_size);
-        encoder.end_encoding();
+        encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
+        encoder.endEncoding();
 
         command_buffer.commit();
 
@@ -712,10 +726,10 @@ impl MetalPCG {
     }
 
     #[cfg(feature = "gpu")]
-    fn copy_buffer_f32_to_vec_f64(&self, buffer: &Buffer, vec: &mut [f64], n: usize) {
+    fn copy_buffer_f32_to_vec_f64(&self, buffer: &ProtocolObject<dyn MTLBuffer>, vec: &mut [f64], n: usize) {
         let mut temp = vec![0.0f32; n];
         unsafe {
-            let ptr = buffer.contents() as *const f32;
+            let ptr = buffer.contents().as_ptr() as *const f32;
             std::ptr::copy_nonoverlapping(ptr, temp.as_mut_ptr(), n);
         }
         for i in 0..n {

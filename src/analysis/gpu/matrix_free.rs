@@ -6,7 +6,17 @@ use crate::analysis::SolverError;
 use crate::structure::{ElementType, StructuralModel};
 
 #[cfg(feature = "gpu")]
-use metal::{Buffer, CommandQueue, ComputePipelineState, Device, Library, MTLResourceOptions};
+use objc2_metal::{
+    MTLBuffer, MTLCommandBuffer as _, MTLCommandEncoder as _, MTLCommandQueue,
+    MTLComputeCommandEncoder as _, MTLComputePipelineState, MTLCreateSystemDefaultDevice,
+    MTLDevice, MTLLibrary, MTLResourceOptions, MTLSize,
+};
+#[cfg(feature = "gpu")]
+use objc2::rc::Retained;
+#[cfg(feature = "gpu")]
+use objc2::runtime::ProtocolObject;
+#[cfg(feature = "gpu")]
+use objc2_foundation::{ns_string, NSString};
 
 /// GPU element representation optimized for parallel computation
 #[repr(C)]
@@ -77,13 +87,13 @@ struct GpuBeamElement {
 /// - Abaqus (large-scale simulations)
 #[cfg(feature = "gpu")]
 pub struct MatrixFreeGPU {
-    device: Device,
-    command_queue: CommandQueue,
-    element_matvec_pipeline: ComputePipelineState,
-    clear_buffer_pipeline: ComputePipelineState,
+    device: Retained<ProtocolObject<dyn MTLDevice>>,
+    command_queue: Retained<ProtocolObject<dyn MTLCommandQueue>>,
+    element_matvec_pipeline: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
+    clear_buffer_pipeline: Retained<ProtocolObject<dyn MTLComputePipelineState>>,
 
     // Element data (resident on GPU)
-    element_buffer: Buffer,
+    element_buffer: Retained<ProtocolObject<dyn MTLBuffer>>,
     num_elements: usize,
     num_dofs: usize,
 }
@@ -95,10 +105,10 @@ impl MatrixFreeGPU {
     pub fn new(model: &StructuralModel) -> Result<Self, String> {
         #[cfg(feature = "gpu")]
         {
-            let device = Device::system_default()
+            let device = MTLCreateSystemDefaultDevice()
                 .ok_or_else(|| "No Metal-compatible GPU found".to_string())?;
 
-            let command_queue = device.new_command_queue();
+            let command_queue = device.newCommandQueue().ok_or_else(|| "Failed to create command queue".to_string())?;
 
             // Convert model elements to GPU format
             let gpu_elements = Self::convert_elements_to_gpu(model)?;
@@ -229,36 +239,38 @@ impl MatrixFreeGPU {
     }
 
     #[cfg(feature = "gpu")]
-    fn compile_shaders(device: &Device) -> Result<Library, String> {
-        let shader_source = include_str!("shaders/element_ops.metal");
+    fn compile_shaders(device: &ProtocolObject<dyn MTLDevice>) -> Result<Retained<ProtocolObject<dyn MTLLibrary>>, String> {
+        let shader_source = ns_string!(include_str!("shaders/element_ops.metal"));
 
         device
-            .new_library_with_source(shader_source, &metal::CompileOptions::new())
+            .newLibraryWithSource_options_error(shader_source, None)
             .map_err(|e| format!("Failed to compile Metal shaders: {}", e))
     }
 
     #[cfg(feature = "gpu")]
     fn create_pipeline(
-        device: &Device,
-        library: &Library,
+        device: &ProtocolObject<dyn MTLDevice>,
+        library: &ProtocolObject<dyn MTLLibrary>,
         function_name: &str,
-    ) -> Result<ComputePipelineState, String> {
+    ) -> Result<Retained<ProtocolObject<dyn MTLComputePipelineState>>, String> {
+        let name = NSString::from_str(function_name);
         let function = library
-            .get_function(function_name, None)
-            .map_err(|e| format!("Failed to get function '{}': {}", function_name, e))?;
+            .newFunctionWithName(&name)
+            .ok_or_else(|| format!("Failed to get function '{}'", function_name))?;
 
         device
-            .new_compute_pipeline_state_with_function(&function)
+            .newComputePipelineStateWithFunction_error(&function)
             .map_err(|e| format!("Failed to create pipeline for '{}': {}", function_name, e))
     }
 
     #[cfg(feature = "gpu")]
-    fn create_buffer<T>(device: &Device, data: &[T]) -> Buffer {
-        let size = (data.len() * std::mem::size_of::<T>()) as u64;
-        let buffer = device.new_buffer(size, MTLResourceOptions::StorageModeShared);
+    fn create_buffer<T>(device: &ProtocolObject<dyn MTLDevice>, data: &[T]) -> Retained<ProtocolObject<dyn MTLBuffer>> {
+        let size = data.len() * std::mem::size_of::<T>();
+        let buffer = device.newBufferWithLength_options(size, MTLResourceOptions::StorageModeShared)
+            .expect("Failed to create buffer");
 
         unsafe {
-            let ptr = buffer.contents() as *mut T;
+            let ptr = buffer.contents().as_ptr() as *mut T;
             std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len());
         }
 
@@ -266,22 +278,22 @@ impl MatrixFreeGPU {
     }
 
     #[cfg(feature = "gpu")]
-    fn create_buffer_f32_from_f64(&self, data: &[f64]) -> Buffer {
+    fn create_buffer_f32_from_f64(&self, data: &[f64]) -> Retained<ProtocolObject<dyn MTLBuffer>> {
         let float_data: Vec<f32> = data.iter().map(|&x| x as f32).collect();
         Self::create_buffer(&self.device, &float_data)
     }
 
     #[cfg(feature = "gpu")]
-    fn create_zero_buffer(&self, size: usize) -> Buffer {
+    fn create_zero_buffer(&self, size: usize) -> Retained<ProtocolObject<dyn MTLBuffer>> {
         let data = vec![0.0f32; size];
         Self::create_buffer(&self.device, &data)
     }
 
     #[cfg(feature = "gpu")]
-    fn copy_buffer_to_vec(&self, buffer: &Buffer, size: usize) -> Vec<f64> {
+    fn copy_buffer_to_vec(&self, buffer: &ProtocolObject<dyn MTLBuffer>, size: usize) -> Vec<f64> {
         let mut temp = vec![0.0f32; size];
         unsafe {
-            let ptr = buffer.contents() as *const f32;
+            let ptr = buffer.contents().as_ptr() as *const f32;
             std::ptr::copy_nonoverlapping(ptr, temp.as_mut_ptr(), size);
         }
         temp.iter().map(|&x| x as f64).collect()
@@ -316,39 +328,39 @@ impl MatrixFreeGPU {
         let buf_x = self.create_buffer_f32_from_f64(x);
         let buf_y = self.create_zero_buffer(self.num_dofs);
 
-        let command_buffer = self.command_queue.new_command_buffer();
+        let command_buffer = self.command_queue.commandBuffer().expect("Failed to create command buffer");
 
         // STEP 1: Explicitly clear the atomic buffer
         // This is CRITICAL - atomic_float buffers don't auto-initialize!
         {
-            let clear_encoder = command_buffer.new_compute_command_encoder();
-            clear_encoder.set_compute_pipeline_state(&self.clear_buffer_pipeline);
-            clear_encoder.set_buffer(0, Some(&buf_y), 0);
+            let clear_encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
+            clear_encoder.setComputePipelineState(&self.clear_buffer_pipeline);
+            clear_encoder.setBuffer_offset_atIndex(Some(&*buf_y), 0, 0);
 
-            let grid_size = metal::MTLSize::new(self.num_dofs as u64, 1, 1);
-            let threadgroup_size = metal::MTLSize::new(256.min(self.num_dofs as u64), 1, 1);
-            clear_encoder.dispatch_threads(grid_size, threadgroup_size);
-            clear_encoder.end_encoding();
+            let grid_size = MTLSize { width: self.num_dofs, height: 1, depth: 1 };
+            let threadgroup_size = MTLSize { width: 256.min(self.num_dofs as u64), height: 1, depth: 1 };
+            clear_encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
+            clear_encoder.endEncoding();
         }
 
         // STEP 2: Compute element contributions
         {
-            let matvec_encoder = command_buffer.new_compute_command_encoder();
-            matvec_encoder.set_compute_pipeline_state(&self.element_matvec_pipeline);
-            matvec_encoder.set_buffer(0, Some(&self.element_buffer), 0); // Elements (resident!)
-            matvec_encoder.set_buffer(1, Some(&buf_x), 0);               // Input vector
-            matvec_encoder.set_buffer(2, Some(&buf_y), 0);               // Output vector
+            let matvec_encoder = command_buffer.computeCommandEncoder().expect("Failed to create compute encoder");
+            matvec_encoder.setComputePipelineState(&self.element_matvec_pipeline);
+            matvec_encoder.setBuffer_offset_atIndex(Some(&*self.element_buffer), 0, 0); // Elements (resident!)
+            matvec_encoder.setBuffer_offset_atIndex(Some(&*buf_x), 0, 1);               // Input vector
+            matvec_encoder.setBuffer_offset_atIndex(Some(&*buf_y), 0, 2);               // Output vector
 
             // Launch one thread per element
-            let grid_size = metal::MTLSize::new(self.num_elements as u64, 1, 1);
-            let threadgroup_size = metal::MTLSize::new(256.min(self.num_elements as u64), 1, 1);
+            let grid_size = MTLSize { width: self.num_elements, height: 1, depth: 1 };
+            let threadgroup_size = MTLSize { width: 256.min(self.num_elements as u64), height: 1, depth: 1 };
 
-            matvec_encoder.dispatch_threads(grid_size, threadgroup_size);
-            matvec_encoder.end_encoding();
+            matvec_encoder.dispatchThreads_threadsPerThreadgroup(grid_size, threadgroup_size);
+            matvec_encoder.endEncoding();
         }
 
         command_buffer.commit();
-        command_buffer.wait_until_completed();
+        command_buffer.waitUntilCompleted();
 
         let result = self.copy_buffer_to_vec(&buf_y, self.num_dofs);
 
